@@ -33,5 +33,6 @@ container environment. Additional cluster mounts can be added to `sif.sh`.
 
 For the existing allocation, run the same command through `srun --jobid=321337
 --overlap --nodes=1 --ntasks=1 --cpu-bind=none --nodelist=gh202` after its current
-GPU work finishes. The GRPO experiment reserves all four gh202 GPUs for training
-and uses the two gh130 GPUs for vLLM rollouts.
+GPU work finishes. The completed GRPO experiment used all four gh202 GPUs for
+training and six Slime-managed SGLang engines on gh130, gh121, and gh203 for
+rollouts. Slime owned synchronization of every policy update to those engines.
