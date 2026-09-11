@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Execute in the pinned CUDA image with this checkout's uv overlay first on PATH.
 set -euo pipefail
+# Ray workers plus concurrent collectors can exceed the login soft task limit.
+# Raise only the inherited soft limit, bounded by the administrator's hard limit.
+slime_task_soft=$(ulimit -Su)
+slime_task_hard=$(ulimit -Hu)
+slime_task_target=16384
+if [[ "$slime_task_hard" != unlimited && "$slime_task_hard" -lt "$slime_task_target" ]]; then
+  slime_task_target=$slime_task_hard
+fi
+if [[ "$slime_task_soft" != unlimited && "$slime_task_soft" -lt "$slime_task_target" ]]; then
+  ulimit -Su "$slime_task_target"
+fi
 experiment_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 slime_workspace=$(cd "$experiment_root/../../.." && pwd)
 slime_root="$slime_workspace/slime"
