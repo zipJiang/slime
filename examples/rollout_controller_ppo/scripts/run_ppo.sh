@@ -18,7 +18,7 @@ source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
 exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/train_slime.py" \
   "${MODEL_ARGS[@]}" \
   --actor-num-nodes 1 --actor-num-gpus-per-node 4 --rollout-num-gpus "${PPO_ROLLOUT_GPUS:-6}" \
-  --rollout-num-gpus-per-engine 1 --num-gpus-per-node 1 \
+  --rollout-num-gpus-per-engine 1 --num-gpus-per-node 2 \
   --hf-checkpoint "$checkpoint" --load "$checkpoint" --ref-load "$checkpoint" \
   --save "$run_root/actor" --save-hf "$run_root/hf/iter_{rollout_id:07d}" --save-interval 12 \
   --rollout-function-path slime_shim.generate_rollout \

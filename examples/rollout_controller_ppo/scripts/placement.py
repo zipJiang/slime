@@ -6,6 +6,15 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from slime.ray.placement_group import InfoActor
 
 
+def rollout_bundle_order(physical, training, rollout):
+    from collections import Counter
+    # Count only actor engines. A dedicated critic on the same host must not
+    # make a single actor engine look like a full two-engine host group.
+    host_sizes = Counter(ip for ip, _ in physical[training:training+rollout])
+    return sorted(range(training, training+rollout), key=lambda i:(
+        -host_sizes[physical[i][0]], physical[i][0], int(physical[i][1])))
+
+
 def pinned_placement(args):
     training = args.actor_num_nodes * args.actor_num_gpus_per_node
     rollout = args.rollout_num_gpus
@@ -27,12 +36,9 @@ def pinned_placement(args):
     if {ip for ip,gpu in physical[:training]} & {ip for ip,gpu in physical[training:]}:
         raise ValueError('Training and rollout hosts must be disjoint')
     train_order = sorted(range(training), key=lambda i:int(physical[i][1]))
-    from collections import Counter
-    host_sizes = Counter(ip for ip, _ in physical[training:])
     # Slime's port allocator groups contiguous engines by num_gpus_per_node.
     # The new rollout pool uses three two-GPU hosts (num_gpus_per_node=2).
-    rollout_order = sorted(range(training,training+rollout), key=lambda i:(
-        -host_sizes[physical[i][0]], physical[i][0], int(physical[i][1])))
+    rollout_order = rollout_bundle_order(physical, training, rollout)
     order = train_order+rollout_order
     ids = [physical[i][1] for i in order]
     output = Path(args.save).parent/'placement.json'
