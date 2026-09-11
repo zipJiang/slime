@@ -41,6 +41,8 @@ class PipelineTests(unittest.TestCase):
         replica = object.__new__(FrozenCriticReplica)
         replica.version, replica.active, replica.model = 'critic-6', False, object()
         self.assertEqual(replica.begin('critic-6'), 'critic-6')
+        with self.assertRaises(RuntimeError):
+            replica.publish('/must-not-be-read', 'critic-7')
         with self.assertRaises(ValueError):
             replica.begin('critic-6')
         with self.assertRaises(ValueError):

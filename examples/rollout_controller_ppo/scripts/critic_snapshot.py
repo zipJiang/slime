@@ -26,10 +26,12 @@ def export_snapshot(worker, directory, version):
         # Only the first DP replica gathers tensors; all of its TP ranks join.
         if mpu.get_data_parallel_rank() == 0:
             for name, param in named_params_and_buffers(worker.args, worker.model):
-                tensor = all_gather_param(name, param)
+                # Slime's scalar LinearForLastLayer is replicated, not TP sharded.
+                is_head = name.endswith(('output_layer.weight', 'output_layer.bias'))
+                tensor = param.data if is_head else all_gather_param(name, param)
                 if dist.get_rank() != 0:
                     continue
-                if name.endswith(('output_layer.weight', 'output_layer.bias')):
+                if is_head:
                     head[name.rsplit('.', 1)[1]] = tensor.detach().cpu().contiguous()
                     continue
                 for key, value in convert_to_hf(worker.args, 'qwen3_5', name, tensor):

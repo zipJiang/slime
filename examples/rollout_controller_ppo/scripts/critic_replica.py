@@ -80,7 +80,7 @@ class FrozenCriticReplica:
                 tokens = torch.tensor([ids], device='cuda')
                 hidden = self.model(input_ids=tokens, use_cache=False).last_hidden_state[0, -1]
                 value = torch.nn.functional.linear(hidden, self.head['weight'], self.head['bias'])
-                score = value.sigmoid().float().item()
+                score = value.float().sigmoid().item()
                 if not math.isfinite(score):
                     raise ValueError('Nonfinite critic prediction')
                 scores.append(score)

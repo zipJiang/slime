@@ -58,6 +58,7 @@ def engine_version(manager):
 
 
 def train(args):
+    driver_started = time.monotonic()
     configure_logger()
     if not args.use_critic or not args.offload_train or args.release_train:
         raise ValueError('Expected native PPO with train offload and persistent ranks')
@@ -234,8 +235,9 @@ def train(args):
             scorer.end()
         if engine_version(manager) != pending['frozen']['server_weight_version']:
             raise RuntimeError('Actor changed during collection')
-        return dict(refs=refs, frozen=pending['frozen'],
-                    seconds=time.monotonic()-pending['started'])
+        timing = json.loads((run/'rollouts'/f"train-{pending['frozen']['rollout_id']:04d}"/
+                             'collection-timing.json').read_text())
+        return dict(refs=refs, frozen=pending['frozen'], seconds=timing['seconds'])
 
     try:
         if args.start_rollout_id == 0 and not args.skip_eval_before_train:
@@ -252,7 +254,7 @@ def train(args):
             raise ValueError('Stop round precedes resume cursor')
         ready = None
         wall_start = time.monotonic()
-        write_json(run/'throughput-start.json', dict(unix_time=time.time(),
+        write_json(run/'throughput-start.json', dict(unix_time=time.time(), startup_seconds=time.monotonic()-driver_started,
             start_round=args.start_rollout_id, last_round=last_round, execution=args.ppo_execution))
         for round_id in range(args.start_rollout_id, last_round+1):
             start = time.monotonic()
@@ -302,12 +304,14 @@ def train(args):
                     stop_requested=stop_requested):
                 pending = begin_collection(round_id+1)
             train_started = time.monotonic()
+            train_started_unix = time.time()
             ray.get(critic.async_train(round_id, critic_refs))
             critic_done = time.monotonic()
             if not warmup:
                 # No foreign critic values: targets were frozen before either update.
                 ray.get(actor.async_train(round_id, actor_refs))
             trained = time.monotonic()
+            trained_unix = time.time()
             if pending is not None:
                 ready = finish_collection(pending)
             drained = time.monotonic()
@@ -332,6 +336,7 @@ def train(args):
                 completed_actor_updates=actor_updates, completed_collection_rounds=round_id+1,
                 server_weight_version=behavior_version, execution=args.ppo_execution,
                 lineage=lineage, prefetched_next=ready is not None,
+                optimizer_window=dict(started_unix=train_started_unix, finished_unix=trained_unix),
                 throughput_elapsed=time.monotonic()-wall_start,
                 seconds=dict(collection=collection_seconds, initial_collection_wait=collected-start,
                     critic=critic_done-train_started, actor=trained-critic_done,

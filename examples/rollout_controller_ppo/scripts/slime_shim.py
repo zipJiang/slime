@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import time
 
 from batches import training_data
 
@@ -24,6 +25,7 @@ def convert_actor_data(args, samples):
 
 
 def generate_rollout(args, rollout_id, data_source, evaluation=False):
+    collection_started = time.time()
     from slime.rollout.base_types import RolloutFnTrainOutput, RolloutFnEvalOutput
     from slime.utils.types import Sample
     run = Path(args.save).parent
@@ -70,6 +72,9 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True,
                 cwd=EXPERIMENT/'snapshots/harness', env=dict(os.environ, PYTHONPATH=str(EXPERIMENT/'snapshots/harness')))
     summary = json.loads((directory/'summary.json').read_text())
+    (directory/'collection-timing.json').write_text(json.dumps(dict(
+        started_unix=collection_started, finished_unix=time.time(),
+        seconds=time.time()-collection_started), indent=2)+'\n')
     if summary['server_weight_version'] != freeze['server_weight_version']:
         raise ValueError('Rollout behavior version changed')
     metrics = {f'collection_{key}': value for key, value in summary['cost'].items()}
