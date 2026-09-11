@@ -11,8 +11,8 @@ def load(path):
 def measure(run):
     start = load(run/'throughput-start.json')
     rounds = list(range(start['start_round'], start['last_round']+1))
-    if len(rounds) < 3:
-        raise ValueError('At least three joint updates are required')
+    if len(rounds) < 4:
+        raise ValueError('At least four joint updates are required for two interior cycles')
     recipe = load(run/'recipe.json')['arguments']
     if rounds[0] < recipe['num_critic_only_steps']:
         raise ValueError('Warmup cannot substitute for joint training timing')
@@ -66,6 +66,7 @@ def measure(run):
         tokens_per_second=output_tokens/elapsed, updates_per_hour=len(rows)*3600/elapsed,
         including_startup_tokens_per_second=output_tokens/(elapsed+start['startup_seconds']),
         interior_updates=len(interior), interior_updates_per_hour=len(interior)*3600/steady_seconds,
+        interior_tokens_per_second=sum(row['output_tokens'] for row in interior)/steady_seconds,
         measured_collection_optimizer_overlap_seconds=overlap_seconds,
         total_gpus=recipe['actor_num_nodes']*recipe['actor_num_gpus_per_node']+recipe['rollout_num_gpus']+int(overlap),
         resume=load(run/'resume.json'), recipe_arguments=recipe)
@@ -85,11 +86,12 @@ def compare(sync, overlap):
         if any(a[k] != b[k] for k in ('round', 'families', 'pass_tokens', 'seed_namespace')):
             raise ValueError('Unmatched questions, budgets, or random seed namespace')
     gain = overlap['tokens_per_second']/sync['tokens_per_second']-1
+    steady_gain = overlap['interior_tokens_per_second']/sync['interior_tokens_per_second']-1
     output_ratio = overlap['output_tokens']/sync['output_tokens']
     comparable = .9 <= output_ratio <= 1.1
-    promote = comparable and gain >= .2
+    promote = comparable and steady_gain >= .2 and gain > 0
     return dict(sync=sync, overlap=overlap, throughput_gain=gain,
-        output_token_ratio=output_ratio, comparable_realized_budget=comparable,
+        steady_throughput_gain=steady_gain, output_token_ratio=output_ratio, comparable_realized_budget=comparable,
         threshold=.2, prioritize_overlap=promote,
         decision='overlap_plus_algorithm' if promote else 'synchronous_algorithm_only',
         note='Throughput benchmark only; accuracy requires the matched heldout training comparison.')

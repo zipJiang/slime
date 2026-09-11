@@ -131,7 +131,7 @@ def main(config_path, journal):
         f'PPO_RESUME_RUN={source}', f"RAY_ADDRESS={config['ray_address']}",
         'PPO_ROLLOUT_GPUS=6', 'bash', str(scripts/'run_resume_ppo.sh'),
         '--ppo-execution', 'sync', '--ppo-benchmark', '--ppo-stop-after-round',
-        str(iteration+3), '--ppo-seed-namespace', config['seed_namespace'])
+        str(iteration+config['measured_updates']), '--ppo-seed-namespace', config['seed_namespace'])
     state.update(stage='sync_benchmark_launched', driver=launch(command, logs/'sync-driver.log'))
     write(journal, state)
     print(json.dumps(state, indent=2), flush=True)

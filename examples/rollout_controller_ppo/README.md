@@ -30,13 +30,14 @@ against native final-context values. Initial verification includes long contexts
 state is served. Each publication is logged; only the newest inference snapshot
 is kept, while normal native paired checkpoints retain recovery state.
 
-Before promotion, compare three joint updates in each mode from the same audited
+Before promotion, compare four joint updates in each mode from the same audited
 warmup checkpoint and question cursor, with `--ppo-benchmark`, a shared
 `--ppo-seed-namespace`, and identical token budgets. Keep six actor inference GPUs
 for synchronous mode so both arms use ten GPUs total. Benchmark mode explicitly
 defers boundary evaluation. Include pipeline fill/drain and publication costs;
-report steady throughput separately. Require at least 20% higher accepted-token
-throughput with comparable budgets and passing target, provenance, probability,
+report steady throughput over the two interior updates separately. Require at
+least 20% higher interior accepted-token throughput and a positive net throughput
+gain over the whole window, with comparable budgets and passing target, provenance, probability,
 checkpoint and native/replica checks before prioritizing overlap. Otherwise
 continue the synchronous algorithm-only arm. This is a throughput selection,
 not evidence of an accuracy improvement.
