@@ -49,6 +49,7 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
         (directory/'replay-source.json').write_text(json.dumps(verified, indent=2)+'\n')
     else:
         directory.mkdir(parents=True, exist_ok=True)
+    (directory/'collection-freeze.json').write_text(json.dumps(freeze, indent=2)+'\n')
     questions = directory/'questions.json'
     questions.write_text(json.dumps(families)+'\n')
     command = [str(ROOT/'rollout-controller/.venv/bin/python'), str(EXPERIMENT/'scripts/collect_rollouts.py'),
@@ -60,6 +61,8 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
         '--split', 'val' if evaluation else 'train', '--pass-tokens', str(args.ppo_pass_tokens),
         '--concurrency', str(args.ppo_search_concurrency), '--prior-strength', str(args.ppo_prior_strength),
         '--estimator', freeze['estimator']]
+    if getattr(args, 'ppo_seed_namespace', None):
+        command += ['--seed-namespace', f'{args.ppo_seed_namespace}/{rollout_id:04d}']
     if evaluation:
         command += ['--evaluation', '--eval-branches', str(args.n_samples_per_eval_prompt)]
     if not replay:

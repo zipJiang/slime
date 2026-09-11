@@ -7,6 +7,40 @@ example owns GPU allocation, native optimization, serving and weight synchroniza
 `scripts/snapshot_sources.py` after committing changes before using the SIF launcher.
 The sibling `slime/.venv` and shared SIF provide the established reusable runtime.
 
+## Batch overlap candidate
+
+`--ppo-execution sync` retains synchronous native critic inference. The optional
+`--ppo-execution overlap` uses five actor inference GPUs and one frozen critic
+inference GPU, with the same four native training GPUs. Set `PPO_ROLLOUT_GPUS=5`
+for overlap. All trees retain one actor and one critic version. A batch can be
+at most one optimizer update old; native PPO uses its stored behavior logprobs.
+The existing numerical mismatch limits remain enforced in both modes.
+
+The next batch is collected while the current batch trains. Publication waits
+for both tasks. Periodic saves, evaluations, the final batch, and a `STOP` file
+in the run directory drain the pipeline before saving the exact question cursor.
+A `STOP` arriving after prefetch begins takes effect after that batch is trained.
+`--ppo-stop-after-round N` ends at zero-based collection round N without changing
+the optimizer schedule; the saved attempt can be resumed normally.
+
+Critic publication gathers only model tensors from the first Megatron DP replica,
+converts the text backbone and scalar head, and verifies checksums and inference
+against native final-context values. Initial verification includes long contexts;
+`--ppo-critic-equivalence-contexts FILE` adds recorded real contexts. No optimizer
+state is served. Each publication is logged; only the newest inference snapshot
+is kept, while normal native paired checkpoints retain recovery state.
+
+Before promotion, compare three joint updates in each mode from the same audited
+warmup checkpoint and question cursor, with `--ppo-benchmark`, a shared
+`--ppo-seed-namespace`, and identical token budgets. Keep six actor inference GPUs
+for synchronous mode so both arms use ten GPUs total. Benchmark mode explicitly
+defers boundary evaluation. Include pipeline fill/drain and publication costs;
+report steady throughput separately. Require at least 20% higher accepted-token
+throughput with comparable budgets and passing target, provenance, probability,
+checkpoint and native/replica checks before prioritizing overlap. Otherwise
+continue the synchronous algorithm-only arm. This is a throughput selection,
+not evidence of an accuracy improvement.
+
 The imported experiment notes below describe the original live run. Generated run
 folders, logs and snapshots are excluded from Git.
 

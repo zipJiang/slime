@@ -193,7 +193,7 @@ async def main(args):
     if (args.output/'contract.json').exists():
         raise ValueError('Refusing to overwrite/reuse a collection directory')
     seed_namespace = ('deontic-c1-heldout-20260910' if args.evaluation else
-                      f'{args.policy_version}/{args.value_version}/{args.output.name}')
+                      (args.seed_namespace or f'{args.policy_version}/{args.value_version}/{args.output.name}'))
     contract = dict(policy_version=args.policy_version, server_weight_version=args.server_weight_version,
         value_version=args.value_version, families=selected, split=args.split, split_sha256=split_hash,
         evaluation=args.evaluation, pass_tokens=args.pass_tokens, max_pass_attempts=args.max_pass_attempts,
@@ -323,6 +323,7 @@ if __name__ == '__main__':
     parser.add_argument('--value-url', default='')
     parser.add_argument('--model', default='Qwen/Qwen3.5-9B')
     parser.add_argument('--policy-version', required=True)
+    parser.add_argument('--seed-namespace', help='Paired benchmark seeds; heldout seeds remain fixed')
     parser.add_argument('--server-weight-version', required=True)
     parser.add_argument('--value-version', required=True)
     parser.add_argument('--questions', type=Path, required=True)

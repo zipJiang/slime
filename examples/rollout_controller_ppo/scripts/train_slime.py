@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import time
 import traceback
 
@@ -23,6 +24,7 @@ from value_service import CriticScorer, serve
 from resume import role_arguments
 from recipe import RECIPE_ID, estimator_for_round, target_source
 from replay_initial import verify_initial_batch
+from pipeline import BatchStamp, save_boundary, may_prefetch
 
 
 def write_json(path, value):
@@ -38,6 +40,12 @@ def custom_args(parser):
     parser.add_argument('--ppo-critic-lr', type=float, default=5e-6)
     parser.add_argument('--ppo-critic-load')
     parser.add_argument('--ppo-replay-initial-batch')
+    parser.add_argument('--ppo-execution', choices=['sync', 'overlap'], default='sync')
+    parser.add_argument('--ppo-critic-replica-host', default='172.16.203.30')
+    parser.add_argument('--ppo-critic-equivalence-contexts')
+    parser.add_argument('--ppo-seed-namespace')
+    parser.add_argument('--ppo-stop-after-round', type=int)
+    parser.add_argument('--ppo-benchmark', action='store_true', help='Defer boundary evaluation to measure training throughput')
     return parser
 
 
@@ -117,15 +125,83 @@ def train(args):
     if not isinstance(sentinel, int):
         raise ValueError('Expected one EOS id for critic-only sentinel')
     parallel = dict(dp_size=2, cp_size=1, vpp_size=1, microbatch_group_size_per_vp_stage=1)
-    scorer = CriticScorer(critic._actor_handlers, critic_args, parallel, tokenizer, sentinel)
+    native_scorer = CriticScorer(critic._actor_handlers, critic_args, parallel, tokenizer, sentinel)
+    overlap = args.ppo_execution == 'overlap'
+    replica = None
+    if overlap:
+        from critic_replica import FrozenCriticReplica, ReplicaScorer
+        from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+        pg, bundle = pgs['critic_inference']
+        replica = ray.remote(num_gpus=1, num_cpus=1)(FrozenCriticReplica).options(
+            scheduling_strategy=PlacementGroupSchedulingStrategy(placement_group=pg,
+                placement_group_bundle_index=bundle)).remote(args.hf_checkpoint, args.seq_length)
+        scorer = ReplicaScorer(replica)
+    else:
+        scorer = native_scorer
     service = serve(scorer)
     value_url = f'http://{ray.util.get_node_ip_address()}:{service.server_port}'
+    behavior_round = args.start_rollout_id
+
+    contexts = [tokenizer.apply_chat_template([dict(role='user', content=s)],
+        tokenize=False, add_generation_prompt=True) for s in
+        ('Checkpoint scoring readiness.', 'A different checkpoint.')]
+    equivalence_contexts = list(contexts)
+    if args.ppo_critic_equivalence_contexts:
+        source = Path(args.ppo_critic_equivalence_contexts)
+        equivalence_contexts += [row['context'] for row in json.loads(source.read_text())['contexts']]
+        write_json(run/'critic-equivalence-input.json', dict(source=str(source),
+            sha256=hashlib.sha256(source.read_bytes()).hexdigest()))
+    # Exercise longer inputs as well as real root contexts before expensive search.
+    equivalence_contexts += [tokenizer.apply_chat_template([dict(role='user',
+        content='A passenger has requested a change. '*n)], tokenize=False,
+        add_generation_prompt=True) for n in (1000, 3000)]
+    previous_snapshot = None
+
+    def publish_critic(completed_rounds, *, initial=False):
+        nonlocal previous_snapshot
+        start = time.monotonic()
+        version = f'critic-{completed_rounds:04d}'
+        snapshot = run/'critic-snapshots'/version
+        exports = ray.get([a.export_snapshot.remote(str(snapshot), version)
+                           for a in critic._actor_handlers])
+        published = ray.get(replica.publish.remote(str(snapshot), version))
+        check_contexts = equivalence_contexts if initial else contexts
+        native_scorer.begin(version)
+        try:
+            expected = native_scorer.score(check_contexts, version)
+        finally:
+            native_scorer.end()
+        scorer.begin(version)
+        try:
+            actual = scorer.score(check_contexts, version)
+            repeated = scorer.score(check_contexts, version)
+        finally:
+            scorer.end()
+        error = max(abs(a-b) for a,b in zip(expected['scores'], actual['scores'], strict=True))
+        report = dict(version=version, native=expected, replica=actual,
+            context_sha256=[hashlib.sha256(c.encode()).hexdigest() for c in check_contexts],
+            context_tokens=[len(tokenizer.encode(c, add_special_tokens=False)) for c in check_contexts],
+            max_abs_error=error, tolerance=.005, deterministic=actual == repeated,
+            exports=exports, publication=published, seconds=time.monotonic()-start)
+        audit_path = run/'critic-publication'/f'{version}.json'
+        audit_path.parent.mkdir(exist_ok=True)
+        write_json(audit_path, report)
+        if error > .005 or actual != repeated:
+            raise RuntimeError('Standalone critic differs from native final-context inference')
+        if previous_snapshot is not None:
+            shutil.rmtree(previous_snapshot)
+        previous_snapshot = snapshot
+        return report['seconds']
+
+    if overlap:
+        publish_critic(behavior_round, initial=True)
 
     def freeze(round_id):
-        value_version = f'critic-{round_id:04d}'
+        value_version = f'critic-{behavior_round:04d}'
         result = dict(rollout_id=round_id, value_version=value_version,
-            policy_version=f'actor-{max(0, round_id-args.num_critic_only_steps):04d}',
+            policy_version=f'actor-{max(0, behavior_round-args.num_critic_only_steps):04d}',
             server_weight_version=behavior_version, value_url=value_url, recipe_id=RECIPE_ID,
+            behavior_round=behavior_round, execution=args.ppo_execution,
             estimator=estimator_for_round(round_id, args.num_critic_only_steps))
         write_json(run/'collection-freeze.json', result)
         return result
@@ -135,8 +211,6 @@ def train(args):
     # and offload lifecycle before the expensive first search.
     scorer.begin(initial['value_version'])
     try:
-        contexts = [tokenizer.apply_chat_template([dict(role='user', content=s)],
-            tokenize=False, add_generation_prompt=True) for s in ('Checkpoint scoring readiness.', 'A different checkpoint.')]
         ready = scorer.score(contexts, initial['value_version'])
         if ready != scorer.score(contexts, initial['value_version']):
             raise RuntimeError('Frozen critic scoring is nondeterministic')
@@ -147,31 +221,57 @@ def train(args):
                                     completed_actor_updates=max(0, args.start_rollout_id-args.num_critic_only_steps),
                                     completed_collection_rounds=args.start_rollout_id))
 
+    def begin_collection(round_id):
+        frozen = freeze(round_id)
+        scorer.begin(frozen['value_version'])
+        return dict(frozen=frozen, started=time.monotonic(),
+                    ref=manager.generate.remote(round_id))
+
+    def finish_collection(pending):
+        try:
+            refs = ray.get(pending['ref'])
+        finally:
+            scorer.end()
+        if engine_version(manager) != pending['frozen']['server_weight_version']:
+            raise RuntimeError('Actor changed during collection')
+        return dict(refs=refs, frozen=pending['frozen'],
+                    seconds=time.monotonic()-pending['started'])
+
     try:
         if args.start_rollout_id == 0 and not args.skip_eval_before_train:
             ray.get(manager.eval.remote(0))
-        if resume is not None and (args.start_rollout_id == args.num_critic_only_steps or
+        if not args.ppo_benchmark and resume is not None and (args.start_rollout_id == args.num_critic_only_steps or
                 (resume['actor_updates'] > 0 and resume['actor_updates'] % args.eval_interval == 0)):
             # A checkpoint is saved before its evaluation. Repeat that boundary
             # evaluation in the fresh attempt so interruption cannot omit it.
             ray.get(manager.eval.remote(args.start_rollout_id))
-        for round_id in range(args.start_rollout_id, args.num_rollout):
+        last_round = args.num_rollout-1
+        if args.ppo_stop_after_round is not None:
+            last_round = min(last_round, args.ppo_stop_after_round)
+        if last_round < args.start_rollout_id:
+            raise ValueError('Stop round precedes resume cursor')
+        ready = None
+        wall_start = time.monotonic()
+        write_json(run/'throughput-start.json', dict(unix_time=time.time(),
+            start_round=args.start_rollout_id, last_round=last_round, execution=args.ppo_execution))
+        for round_id in range(args.start_rollout_id, last_round+1):
             start = time.monotonic()
-            frozen = freeze(round_id)
-            scorer.begin(frozen['value_version'])
-            try:
-                if round_id == 0 and args.ppo_replay_initial_batch:
-                    write_json(run/'replay-initial-batch-verified.json', verify_initial_batch(args, scorer, frozen))
-                actor_refs = ray.get(manager.generate.remote(round_id))
-            finally:
-                scorer.end()
+            if ready is None:
+                ready = finish_collection(begin_collection(round_id))
+            actor_refs, frozen = ready['refs'], ready['frozen']
+            collection_seconds = ready['seconds']
+            ready = None
             collected = time.monotonic()
-            if engine_version(manager) != behavior_version:
-                raise RuntimeError('Actor changed during collection')
             directory = run/'rollouts'/f'train-{round_id:04d}'
+            lineage = BatchStamp(round_id, frozen['behavior_round'], args.num_critic_only_steps).lineage(
+                round_id, overlap=overlap)
+            write_json(directory/'training-lineage.json', lineage)
             contract = json.loads((directory/'contract.json').read_text())
             if (contract['recipe_id'] != RECIPE_ID
-                    or contract['estimator'] != frozen['estimator']):
+                    or contract['estimator'] != frozen['estimator']
+                    or contract['policy_version'] != frozen['policy_version']
+                    or contract['value_version'] != frozen['value_version']
+                    or contract['server_weight_version'] != frozen['server_weight_version']):
                 raise ValueError('Collection preparation recipe mismatch')
             rows = []
             warmup = round_id < args.num_critic_only_steps
@@ -189,17 +289,31 @@ def train(args):
                 max_sequence_length=args.seq_length, warmup=warmup) for row in rows]
             data = training_data(rows, lane='critic', expected_groups=range(args.rollout_batch_size))
             critic_refs = put_packets(partition_data(critic_args, parallel, data))
+            actor_updates = max(0, round_id+1-args.num_critic_only_steps)
+            stop_requested = (run/'STOP').exists()
+            save_now = save_boundary(round_id, args.num_critic_only_steps,
+                                     args.save_interval, last_round) or stop_requested
+            eval_now = not args.ppo_benchmark and (
+                (round_id+1 == args.num_critic_only_steps and args.skip_eval_before_train) or
+                (not warmup and actor_updates % args.eval_interval == 0))
+            pending = None
+            if overlap and may_prefetch(round_id, warmup_rounds=args.num_critic_only_steps,
+                    last_round=last_round, save_now=save_now, eval_now=eval_now,
+                    stop_requested=stop_requested):
+                pending = begin_collection(round_id+1)
+            train_started = time.monotonic()
             ray.get(critic.async_train(round_id, critic_refs))
             critic_done = time.monotonic()
             if not warmup:
                 # No foreign critic values: targets were frozen before either update.
                 ray.get(actor.async_train(round_id, actor_refs))
             trained = time.monotonic()
-            actor_updates = max(0, round_id+1-args.num_critic_only_steps)
-            save_now = (round_id == 0 or round_id+1 == args.num_critic_only_steps or
-                        (actor_updates > 0 and actor_updates % args.save_interval == 0) or
-                        round_id+1 == args.num_rollout)
+            if pending is not None:
+                ready = finish_collection(pending)
+            drained = time.monotonic()
             if save_now:
+                if ready is not None:
+                    raise RuntimeError('Checkpoint cannot skip a prefetched question batch')
                 actor.save_model(round_id, force_sync=True)
                 critic.save_model(round_id, force_sync=True)
                 if args.rollout_global_dataset:
@@ -212,21 +326,25 @@ def train(args):
                     raise RuntimeError('Slime did not advance actor weight version')
             elif engine_version(manager) != behavior_version:
                 raise RuntimeError('Actor inference weights changed during critic-only warm-up')
+            behavior_round = round_id+1
+            publish_seconds = publish_critic(behavior_round) if overlap else 0.
             status = dict(stage='critic_warmup' if warmup else 'ppo',
                 completed_actor_updates=actor_updates, completed_collection_rounds=round_id+1,
-                server_weight_version=behavior_version,
-                seconds=dict(collection=collected-start, critic=critic_done-collected,
-                             actor=trained-critic_done, total=time.monotonic()-start))
+                server_weight_version=behavior_version, execution=args.ppo_execution,
+                lineage=lineage, prefetched_next=ready is not None,
+                throughput_elapsed=time.monotonic()-wall_start,
+                seconds=dict(collection=collection_seconds, initial_collection_wait=collected-start,
+                    critic=critic_done-train_started, actor=trained-critic_done,
+                    prefetch_tail=drained-trained, critic_publication=publish_seconds,
+                    total=time.monotonic()-start))
             write_json(run/'status.json', status)
             write_json(directory/'training-complete.json', status)
-            if round_id+1 == args.num_critic_only_steps and args.skip_eval_before_train:
-                # Base actor is still unchanged; start productive warm-up first.
+            if eval_now:
                 freeze(round_id+1)
                 ray.get(manager.eval.remote(round_id+1))
-            if not warmup and actor_updates % args.eval_interval == 0:
-                freeze(round_id+1)
-                ray.get(manager.eval.remote(round_id+1))
-        write_json(run/'completed.json', status)
+            if stop_requested:
+                break
+        write_json(run/('completed.json' if round_id+1 == args.num_rollout else 'paused.json'), status)
     except Exception:
         write_json(run/'failed.json', dict(rollout_id=round_id if 'round_id' in locals() else None,
             traceback=traceback.format_exc(), last_completed=json.loads((run/'status.json').read_text())))
@@ -235,6 +353,8 @@ def train(args):
         service.shutdown()
         service.server_close()
     ray.get(manager.dispose.remote())
+    if replica is not None:
+        ray.kill(replica)
     finish_tracking(args)
 
 

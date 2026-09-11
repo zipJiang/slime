@@ -16,6 +16,13 @@ def check(args, rollout_id, data):
     current, behavior = data.get('log_probs'), data.get('rollout_log_probs')
     if current is None:  # Non-last pipeline stage (PP=1 in this experiment).
         return
+    directory = Path(args.save).parent/'rollouts'/f'train-{rollout_id:04d}'
+    lineage = json.loads((directory/'training-lineage.json').read_text())
+    from pipeline import BatchStamp
+    expected = BatchStamp(rollout_id, lineage['behavior_round'], args.num_critic_only_steps).lineage(
+        rollout_id, overlap=args.ppo_execution == 'overlap')
+    if lineage != expected:
+        raise ValueError('Training lineage changed before native PPO')
     differences = []
     for new, old, mask in zip(current, behavior, data['loss_masks'], strict=True):
         mask = mask.to(device=new.device,dtype=torch.bool)
@@ -23,7 +30,7 @@ def check(args, rollout_id, data):
     diff = torch.cat(differences)
     if not diff.numel() or not torch.isfinite(diff).all():
         raise ValueError('Missing or nonfinite current/behavior token log probabilities')
-    report = dict(rollout_id=rollout_id, rank=dist.get_rank(), tokens=diff.numel(),
+    report = dict(rollout_id=rollout_id, rank=dist.get_rank(), tokens=diff.numel(), lineage=lineage,
                   mean_abs_difference=diff.abs().mean().item(),
                   p99_abs_difference=diff.abs().quantile(.99).item(),
                   mean_ratio=diff.exp().mean().item())

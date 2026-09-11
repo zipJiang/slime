@@ -4,11 +4,11 @@ experiment_root=$(cd "$(dirname "$0")/.." && pwd)
 workspace_root=$(cd "$experiment_root/../../.." && pwd)
 slime_root="$workspace_root/slime"
 checkpoint="/weka/projects/bvandur1/zjiang31/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/c202236235762e1c871ad0ccb60c8ee5ba337b9a"
-run_root="$experiment_root/runs/${PPO_RUN_NAME:-direct-branch-v1}"
-storage_root=/weka/projects/bvandur1/zjiang31/deontic-ppo-direct-branch-9b/runs
-mkdir -p "$experiment_root/runs" "$storage_root/${PPO_RUN_NAME:-direct-branch-v1}"
+run_root="$experiment_root/runs/${PPO_RUN_NAME:?Set a fresh PPO_RUN_NAME}"
+storage_root=${PPO_STORAGE_ROOT:-/weka/projects/bvandur1/zjiang31/deontic-ppo-overlap-9b/runs}
+mkdir -p "$experiment_root/runs" "$storage_root/$PPO_RUN_NAME"
 if [[ ! -e "$run_root" ]]; then
-  ln -s "$storage_root/${PPO_RUN_NAME:-direct-branch-v1}" "$run_root"
+  ln -s "$storage_root/$PPO_RUN_NAME" "$run_root"
 fi
 export SLIME_EXTRA_PYTHONPATH="$experiment_root/scripts"
 export RAY_ADDRESS=${RAY_ADDRESS:-172.16.204.2:6405}
@@ -17,8 +17,8 @@ export GLOO_SOCKET_IFNAME=ens0 NCCL_SOCKET_IFNAME=ens0
 source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
 exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/train_slime.py" \
   "${MODEL_ARGS[@]}" \
-  --actor-num-nodes 1 --actor-num-gpus-per-node 4 --rollout-num-gpus 6 \
-  --rollout-num-gpus-per-engine 1 --num-gpus-per-node 2 \
+  --actor-num-nodes 1 --actor-num-gpus-per-node 4 --rollout-num-gpus "${PPO_ROLLOUT_GPUS:-6}" \
+  --rollout-num-gpus-per-engine 1 --num-gpus-per-node 1 \
   --hf-checkpoint "$checkpoint" --load "$checkpoint" --ref-load "$checkpoint" \
   --save "$run_root/actor" --save-hf "$run_root/hf/iter_{rollout_id:07d}" --save-interval 12 \
   --rollout-function-path slime_shim.generate_rollout \

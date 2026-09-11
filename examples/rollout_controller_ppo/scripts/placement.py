@@ -9,8 +9,12 @@ from slime.ray.placement_group import InfoActor
 def pinned_placement(args):
     training = args.actor_num_nodes * args.actor_num_gpus_per_node
     rollout = args.rollout_num_gpus
+    replica = getattr(args, 'ppo_execution', 'sync') == 'overlap'
     bundles = ([{'CPU':1,'GPU':1,'deontic_direct_branch_train':0.001} for _ in range(training)] +
                [{'CPU':1,'GPU':1,'deontic_direct_branch_rollout':0.001} for _ in range(rollout)])
+    if replica:
+        bundles.append({'CPU':1, 'GPU':1, 'deontic_direct_branch_rollout':0.001,
+                        f'node:{args.ppo_critic_replica_host}':0.001})
     pg = placement_group(bundles, strategy='PACK')
     ray.get(pg.ready(), timeout=180)
     actors = [InfoActor.options(scheduling_strategy=PlacementGroupSchedulingStrategy(
@@ -27,7 +31,7 @@ def pinned_placement(args):
     host_sizes = Counter(ip for ip, _ in physical[training:])
     # Slime's port allocator groups contiguous engines by num_gpus_per_node.
     # The new rollout pool uses three two-GPU hosts (num_gpus_per_node=2).
-    rollout_order = sorted(range(training,len(bundles)), key=lambda i:(
+    rollout_order = sorted(range(training,training+rollout), key=lambda i:(
         -host_sizes[physical[i][0]], physical[i][0], int(physical[i][1])))
     order = train_order+rollout_order
     ids = [physical[i][1] for i in order]
@@ -35,7 +39,9 @@ def pinned_placement(args):
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps([dict(role='train' if i<training else 'rollout',
         rank=i if i<training else i-training, host=physical[b][0],gpu=physical[b][1])
-        for i,b in enumerate(order)],indent=2)+'\n')
+        for i,b in enumerate(order)] + ([dict(role='critic_inference', host=physical[-1][0],
+            gpu=physical[-1][1])] if replica else []),indent=2)+'\n')
     print(output.read_text(),flush=True)
     return {'actor':(pg,order,ids), 'critic':(pg,order,ids),
-            'rollout':(pg,order[training:],ids[training:])}
+            'rollout':(pg,order[training:],ids[training:]),
+            'critic_inference':(pg,len(bundles)-1) if replica else None}

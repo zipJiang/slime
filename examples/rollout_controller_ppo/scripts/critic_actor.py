@@ -14,6 +14,10 @@ from value_loss import probability_values
 class CheckpointCriticActor(MegatronTrainRayActor):
     _scoring_version = None
 
+    def export_snapshot(self, directory, version):
+        from critic_snapshot import export_snapshot
+        return export_snapshot(self, directory, version)
+
     def init(self, args, role, with_ref=False, with_opd_teacher=False):
         if args.use_wandb and not getattr(args, 'wandb_run_id', None):
             raise RuntimeError('Critic worker requires the initialized primary tracking run ID')
