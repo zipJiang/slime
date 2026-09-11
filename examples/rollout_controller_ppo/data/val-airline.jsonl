@@ -1,0 +1,5 @@
+{"prompt": [{"role": "user", "content": "airline/airline_cases_complexity_0_airline_cases_18"}], "metadata": {"domain": "airline", "family": "airline/airline_cases_complexity_0_airline_cases_18"}}
+{"prompt": [{"role": "user", "content": "airline/airline_cases_complexity_1_airline_cases_15"}], "metadata": {"domain": "airline", "family": "airline/airline_cases_complexity_1_airline_cases_15"}}
+{"prompt": [{"role": "user", "content": "airline/airline_cases_complexity_1_airline_cases_61"}], "metadata": {"domain": "airline", "family": "airline/airline_cases_complexity_1_airline_cases_61"}}
+{"prompt": [{"role": "user", "content": "airline/airline_cases_complexity_2_airline_cases_23"}], "metadata": {"domain": "airline", "family": "airline/airline_cases_complexity_2_airline_cases_23"}}
+{"prompt": [{"role": "user", "content": "airline/airline_cases_complexity_2_airline_cases_65"}], "metadata": {"domain": "airline", "family": "airline/airline_cases_complexity_2_airline_cases_65"}}

@@ -1,0 +1,27 @@
+{
+  "source": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/compaction-mixed-9b/data/mixed-v1/manifest.json",
+  "source_sha256": "bb1d38cb0422057a556d01ed4e6a219f3e5ae7260c434d05c74e6fc34461ecfc",
+  "output_sha256": "ef36f86fdec446b43d3436acbdb7bfd31c0584a21436ed9b93d3f70586ed07b6",
+  "training_families": {
+    "airline": 23,
+    "sara_numeric": 27,
+    "sara_binary": 7
+  },
+  "balanced_question_rows": 81,
+  "heldout_families": [
+    "airline/airline_cases_complexity_0_airline_cases_18",
+    "airline/airline_cases_complexity_1_airline_cases_15",
+    "airline/airline_cases_complexity_1_airline_cases_61",
+    "airline/airline_cases_complexity_2_airline_cases_23",
+    "airline/airline_cases_complexity_2_airline_cases_65",
+    "sara_binary/s152_c_1_neg",
+    "sara_binary/s1_c_i_neg",
+    "sara_numeric/tax_case_13",
+    "sara_numeric/tax_case_4",
+    "sara_numeric/tax_case_53",
+    "sara_numeric/tax_case_61",
+    "sara_numeric/tax_case_74",
+    "sara_numeric/tax_case_83"
+  ],
+  "reused_imitation_trajectories": false
+}

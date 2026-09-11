@@ -1,0 +1,7 @@
+{
+  "harness_commit": "d1a77c15200771fd2e3434c916641d9eed095f62",
+  "slime_base_commit": "3edd36829df6ece033eb2e14baaf3db62e359c62",
+  "recipe_id": "direct-branch-td-v1-suffix-warmup",
+  "imported_from": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-ppo-direct-branch-9b",
+  "note": "Synchronous baseline imported byte-for-byte; runtime datasets and scripts pinned independently of running experiments."
+}

@@ -1,0 +1,6 @@
+snapshots/
+runs/
+logs/
+validation/
+__pycache__/
+*.pyc
