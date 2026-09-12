@@ -15,7 +15,8 @@ export RAY_ADDRESS=${RAY_ADDRESS:-172.16.204.2:6405}
 export OMP_NUM_THREADS=4 NCCL_IB_DISABLE=1 CUDA_DEVICE_MAX_CONNECTIONS=1
 export GLOO_SOCKET_IFNAME=ens0 NCCL_SOCKET_IFNAME=ens0
 source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
-exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/train_slime.py" \
+exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/with_torch_cudnn.py" \
+  python "$experiment_root/scripts/train_slime.py" \
   "${MODEL_ARGS[@]}" \
   --actor-num-nodes 1 --actor-num-gpus-per-node 4 --rollout-num-gpus "${PPO_ROLLOUT_GPUS:-6}" \
   --rollout-num-gpus-per-engine 1 --num-gpus-per-node 2 \

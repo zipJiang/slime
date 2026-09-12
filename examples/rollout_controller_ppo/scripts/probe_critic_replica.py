@@ -19,12 +19,27 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     import torch
+    def backend_flags():
+        return dict(matmul_tf32=torch.backends.cuda.matmul.allow_tf32,
+            bf16_reduced=torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+            cudnn_tf32=torch.backends.cudnn.allow_tf32,
+            cudnn_sdp=torch.backends.cuda.cudnn_sdp_enabled(),
+            flash_sdp=torch.backends.cuda.flash_sdp_enabled(),
+            efficient_sdp=torch.backends.cuda.mem_efficient_sdp_enabled(),
+            matmul_precision=torch.get_float32_matmul_precision())
+    before_import = backend_flags()
+    # Match trainer import order: loading Transformer Engine after a cuDNN
+    # convolution can mix the image's and Torch's cuDNN component libraries.
+    from slime_plugins.models.qwen3_5 import Qwen3_5GatedDeltaNet
+    after_import = backend_flags()
     from critic_replica import FrozenCriticReplica
 
     audit = json.loads(args.audit.read_text())
     version = audit['version']
     replica = FrozenCriticReplica(args.base, 32768)
     publication = replica.publish(args.snapshot, version)
+    # Keep the historical control explicit even if the production default changes.
+    replica.model.set_attn_implementation('sdpa')
     assert publication['manifest']['sha256'] == audit['publication']['manifest']['sha256']
     tokenizer = replica.tokenizer
     contexts = [tokenizer.apply_chat_template([dict(role='user', content=s)],
@@ -40,7 +55,9 @@ def main():
     result = dict(version=version, audit=str(args.audit),
         audit_sha256=hashlib.sha256(args.audit.read_bytes()).hexdigest(),
         source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        publication=publication, torch=torch.__version__, rows=[])
+        publication=publication, torch=torch.__version__, rows=[],
+        before_import=before_import, after_import=after_import,
+        cudnn_version=torch.backends.cudnn.version())
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     def save():
@@ -83,11 +100,36 @@ def main():
     run('sdpa_sentinel', sentinel=True)
     run('sdpa_padded', sentinel=True, pad=True)
     run('sdpa_packed_gdn', sentinel=True, packed=True)
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+        run('flash_sdp_sentinel', sentinel=True)
+        run('flash_sdp_packed_gdn', sentinel=True, packed=True)
+    previous_reduction = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+    run('sdpa_no_reduced_bf16', sentinel=True)
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = previous_reduction
+    for implementation in ['flash_attention_2', 'flash_attention_3']:
+        replica.model.set_attn_implementation(implementation)
+        run(implementation+'_sentinel', sentinel=True)
+        run(implementation+'_packed_gdn', sentinel=True, packed=True)
+    # The native recipe enables bias_swiglu_fusion. Reuse that exact forward
+    # operation to isolate its intermediate BF16 rounding from HF eager SiLU.
+    from megatron.core.fusions.fused_bias_swiglu import swiglu
+    from types import MethodType
+
+    def native_mlp(self, hidden):
+        gate, up = self.gate_proj(hidden), self.up_proj(hidden)
+        return self.down_proj(swiglu(torch.cat([gate, up], dim=-1)))
+
+    for layer in replica.model.layers:
+        layer.mlp.forward = MethodType(native_mlp, layer.mlp)
+    for implementation in ['flash_attention_2', 'flash_attention_3', 'sdpa']:
+        replica.model.set_attn_implementation(implementation)
+        run('native_swiglu_'+implementation, sentinel=True, packed=True)
+    replica.model.set_attn_implementation('sdpa')
 
     # Native Slime uses FLA's ShortConvolution and gated norm. Substitute only
     # those linear-attention blocks, retaining the exact exported tensors.
-    from slime_plugins.models.qwen3_5 import Qwen3_5GatedDeltaNet
-
     class NativeBlock(torch.nn.Module):
         def __init__(self, block):
             super().__init__()
@@ -106,14 +148,18 @@ def main():
         old = layer.linear_attn
         state = old.state_dict()
         native = Qwen3_5GatedDeltaNet(replica.model.config, i).to(device='cuda', dtype=torch.bfloat16)
-        state['conv1d.weight'] = state['conv1d.weight'].squeeze(1)
+        state['conv1d.weight'] = state['conv1d.weight'].reshape_as(native.conv1d.weight)
         native.load_state_dict(state, strict=True)
         for name, tensor in native.state_dict().items():
             assert torch.equal(tensor, state[name]), name
         layer.linear_attn = NativeBlock(native).eval()
         del old, state
     torch.cuda.empty_cache()
-    run('native_gdn_sdpa_sentinel', sentinel=True)
+    run('native_gdn_swiglu_sdpa_sentinel', sentinel=True)
+    with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+        run('native_gdn_swiglu_flash_sentinel', sentinel=True)
+    replica.model.set_attn_implementation('flash_attention_3')
+    run('native_gdn_swiglu_fa3_sentinel', sentinel=True)
     result['complete'] = True
     save()
 

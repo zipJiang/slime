@@ -138,3 +138,24 @@ audit new artifacts. Checkpoint watchers invoke the SIF wrapper themselves.
 
 The proposed async extension is documented separately in the rollout-controller
 repository at `docs/research/bounded-async-tree-ppo.md` and is not enabled here.
+
+## Critic inference consistency
+
+The standalone critic pins `flash_attention_2` and scores the final context token
+before an appended sentinel, matching native checkpoint positioning. Every
+publication checks the full equivalence corpus, not just the two readiness
+prompts. The absolute probability tolerance remains 0.005. Publication fails on
+incorrect versions/counts, invalid probabilities, nondeterminism, or excessive
+error, and records per-context differences.
+
+`ray_node.sh` and `run_ppo.sh` use `with_torch_cudnn.py` inside the SIF. It sets both
+`CUDNN_HOME` (which Transformer Engine checks first) and `LD_LIBRARY_PATH` to the
+Python-bundled cuDNN. The image also has an older system cuDNN; mixing them made
+loading import-order dependent. Start fresh Ray nodes with these launchers for a
+future training run. Existing processes and standalone evaluation launchers are
+unchanged.
+
+`probe_critic_replica.py` provides read-only inference ablations against archived
+native critic scores and checks tensor/context hashes before comparison. The
+September 12 regression covers critic versions 6 and 78; future publications
+must still pass their own live native comparison.

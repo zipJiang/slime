@@ -38,7 +38,10 @@ class FrozenCriticReplica:
                 raise ValueError(f'Critic snapshot checksum mismatch: {name}')
         if self.model is None:
             self.model, info = AutoModel.from_pretrained(directory, local_files_only=True,
-                dtype=torch.bfloat16, attn_implementation='sdpa', output_loading_info=True)
+                # Native critic attention uses the FlashAttention family.
+                # SDPA's implicit kernel selection exceeded the equivalence
+                # tolerance on critic-0078; pin the tested implementation.
+                dtype=torch.bfloat16, attn_implementation='flash_attention_2', output_loading_info=True)
             if any(info.get(k) for k in ('missing_keys', 'unexpected_keys', 'mismatched_keys', 'error_msgs')):
                 raise ValueError(f'Critic backbone loading mismatch: {info}')
             self.model.eval().to('cuda')
@@ -51,7 +54,8 @@ class FrozenCriticReplica:
         torch.cuda.synchronize()
         self.version = version
         return dict(version=version, seconds=time.monotonic()-start,
-                    device=torch.cuda.get_device_name(), manifest=report)
+                    device=torch.cuda.get_device_name(), manifest=report,
+                    attention_implementation=self.model.config._attn_implementation)
 
     def begin(self, version):
         if self.active or version != self.version or self.model is None:
@@ -77,8 +81,10 @@ class FrozenCriticReplica:
                 ids = self.tokenizer.encode(context, add_special_tokens=False)
                 if not 0 < len(ids) < self.max_length:
                     raise ValueError('Critic context outside native sequence budget')
-                tokens = torch.tensor([ids], device='cuda')
-                hidden = self.model(input_ids=tokens, use_cache=False).last_hidden_state[0, -1]
+                # Match checkpoint_fields: append one sentinel, then select
+                # the preceding (final context) position. It is never scored.
+                tokens = torch.tensor([[*ids, self.tokenizer.eos_token_id]], device='cuda')
+                hidden = self.model(input_ids=tokens, use_cache=False).last_hidden_state[0, len(ids)-1]
                 value = torch.nn.functional.linear(hidden, self.head['weight'], self.head['bias'])
                 score = value.float().sigmoid().item()
                 if not math.isfinite(score):
