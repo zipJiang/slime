@@ -17,6 +17,7 @@ from slime.utils.arguments import parse_args
 
 from batches import partition_data, put_packets, training_data
 from critic_actor import CheckpointCriticActor
+from critic_equivalence import compare_scores
 from placement import pinned_placement
 from slime_shim import read_rows
 from targets import checkpoint_fields
@@ -158,7 +159,7 @@ def train(args):
         add_generation_prompt=True) for n in (1000, 3000)]
     previous_snapshot = None
 
-    def publish_critic(completed_rounds, *, initial=False):
+    def publish_critic(completed_rounds):
         nonlocal previous_snapshot
         start = time.monotonic()
         version = f'critic-{completed_rounds:04d}'
@@ -166,7 +167,9 @@ def train(args):
         exports = ray.get([a.export_snapshot.remote(str(snapshot), version)
                            for a in critic._actor_handlers])
         published = ray.get(replica.publish.remote(str(snapshot), version))
-        check_contexts = equivalence_contexts if initial else contexts
+        # Every publication must pass the same corpus as restart. Two readiness
+        # prompts missed real-context drift at critic-0078 before recovery.
+        check_contexts = equivalence_contexts
         native_scorer.begin(version)
         try:
             expected = native_scorer.score(check_contexts, version)
@@ -178,16 +181,17 @@ def train(args):
             repeated = scorer.score(check_contexts, version)
         finally:
             scorer.end()
-        error = max(abs(a-b) for a,b in zip(expected['scores'], actual['scores'], strict=True))
+        comparison = compare_scores(expected, actual, repeated, version=version,
+                                    count=len(check_contexts))
         report = dict(version=version, native=expected, replica=actual,
             context_sha256=[hashlib.sha256(c.encode()).hexdigest() for c in check_contexts],
             context_tokens=[len(tokenizer.encode(c, add_special_tokens=False)) for c in check_contexts],
-            max_abs_error=error, tolerance=.005, deterministic=actual == repeated,
+            **comparison,
             exports=exports, publication=published, seconds=time.monotonic()-start)
         audit_path = run/'critic-publication'/f'{version}.json'
         audit_path.parent.mkdir(exist_ok=True)
         write_json(audit_path, report)
-        if error > .005 or actual != repeated:
+        if not comparison['passed']:
             raise RuntimeError('Standalone critic differs from native final-context inference')
         if previous_snapshot is not None:
             shutil.rmtree(previous_snapshot)
@@ -195,7 +199,7 @@ def train(args):
         return report['seconds']
 
     if overlap:
-        publish_critic(behavior_round, initial=True)
+        publish_critic(behavior_round)
 
     def freeze(round_id):
         value_version = f'critic-{behavior_round:04d}'
