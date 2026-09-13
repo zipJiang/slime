@@ -19,8 +19,9 @@ from examples.deontic.synthetic_compaction import FoldGenerator, FOLD_DRAW
 from step_controller.codec import ChatCodec
 from step_controller.generation import PolicyFormat, SamplingParams
 from step_controller.generation.parsing import QwenXMLToolCallParser
-from context_bound import ContextBoundedCompactor
+from context_bound import ContextBoundedCompactor, FOLD_OVERFLOW_LIMIT
 from judge_contract import verdict
+from provenance import sha256, validate_source_transition
 
 
 def write(path, value):
@@ -42,6 +43,17 @@ def context(payload, tools, tokenizer):
         tokenize=False, add_generation_prompt=True)
 
 
+async def collect_all(episodes):
+    # An episode failure must not cancel unrelated, expensive in-flight traces.
+    results = await asyncio.gather(*episodes, return_exceptions=True)
+    errors = [result for result in results if isinstance(result, Exception)]
+    for result in results:
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
+            raise result
+    if errors:
+        raise ExceptionGroup('Collection episodes failed after draining remaining work', errors)
+
+
 async def main(args):
     import httpx
     from transformers import AutoTokenizer
@@ -56,6 +68,7 @@ async def main(args):
         split_sha256=hashlib.sha256((EXPERIMENT/'data/split.json').read_bytes()).hexdigest(),
         train_ids=split['train'][:128], validation_ids=split['development'][:32],
         samples_per_question=4, task_limit=48, max_context=32768, prompt_limit=14336,
+        fold_overflow_context=FOLD_OVERFLOW_LIMIT,
         actor_max_tokens=6144, fold_max_tokens=4096, actor_temperature=1., actor_top_p=1.,
         fold_temperature=.2, fold_top_p=.95, call_budget=10, top_k=5,
         snippet_chars=700, read_chars=6000, checkpoint_sampling='root and every fold',
@@ -64,7 +77,7 @@ async def main(args):
         judge_prompt_sha256=hashlib.sha256((SYSTEM+TEMPLATE).encode()).hexdigest(),
         sources={str(p.relative_to(EXPERIMENT)):hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in [*sorted((EXPERIMENT/'snapshots/harness').rglob('*.py')),
-                     *(EXPERIMENT/'scripts'/name for name in ['collect.py','context_bound.py','judge_contract.py'])]})
+                     *(EXPERIMENT/'scripts'/name for name in ['collect.py','context_bound.py','judge_contract.py','provenance.py'])]})
     if (out/'manifest.json').exists():
         old=json.loads((out/'manifest.json').read_text())
         # Other scripts can be added while collection runs; the collector's own
@@ -72,6 +85,7 @@ async def main(args):
         for key in manifest.keys()-{'sources'}: assert old[key] == manifest[key], key
         for key, value in old['sources'].items():
             assert hashlib.sha256((EXPERIMENT/key).read_bytes()).hexdigest() == value, key
+        validate_source_transition(out)
     else:
         write(out/'manifest.json', manifest)
     generator = FoldGenerator(model=args.model, served_model='Qwen/Qwen3.5-9B',
@@ -164,6 +178,7 @@ async def main(args):
                     with gzip.open(path.with_suffix('.contexts.jsonl.gz'),'wt') as stream:
                         for row in rows: stream.write(json.dumps(row)+'\n')
                     write(path,dict(case_id=case_id,sample=sample,lane=lane,judge=result,
+                        collection_manifest_sha256=sha256(out/'manifest.json'),
                         exact_match=grade(submitted,case),done=state.done,horizon_finished=state.truncated,turns=state.turns_taken,
                         folds=state.folds,checkpoints=len(rows),seconds=time.time()-started,
                         source_sha256=hashlib.sha256(raw).hexdigest(),
@@ -182,7 +197,7 @@ async def main(args):
         # even if a resource deadline interrupts the full collection.
         jobs.sort(key=lambda j:hashlib.sha256('/'.join(map(str,j)).encode()).hexdigest())
         if args.pilot: jobs=jobs[:4]
-        await asyncio.gather(*(one(*job) for job in jobs))
+        await collect_all(one(*job) for job in jobs)
         write(out/('pilot-complete.json' if args.pilot else 'collection-complete.json'),
               dict(traces=len(jobs),unix_time=time.time()))
 

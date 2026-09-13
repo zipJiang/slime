@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import pytest
-from provenance import dataset_inventory, function_sha256, validate_collection_provenance
+from provenance import dataset_inventory, function_sha256, validate_collection_provenance, validate_source_transition
 
 
 def digest(path):
@@ -60,3 +60,34 @@ def test_function_hash_is_scoped_to_the_context_contract(tmp_path):
     assert function_sha256(source,'context')==first
     source.write_text('def context(x):\n    return x + 2\n')
     assert function_sha256(source,'context')!=first
+
+
+def test_recovery_keeps_old_traces_bound_to_old_sources(tmp_path):
+    experiment, collection, split, source = fixture(tmp_path)
+    recovery = collection/'recovery'
+    (recovery/'sources').mkdir(parents=True)
+    (recovery/'sources/collector.py').write_bytes(source.read_bytes())
+    previous = recovery/'manifest.json'
+    previous.write_bytes((collection/'manifest.json').read_bytes())
+    row = collection/'train/q/sample-0.json'
+    row.parent.mkdir(parents=True)
+    row.write_text('{"original":true}')
+    inventory = recovery/'retained.json'
+    inventory.write_text(json.dumps({'train/q/sample-0.json':digest(row)}))
+    manifest = json.loads(previous.read_text())
+    manifest['source_transition'] = dict(previous_manifest='recovery/manifest.json',
+        previous_manifest_sha256=digest(previous), retained_inventory='recovery/retained.json',
+        retained_inventory_sha256=digest(inventory))
+    source.write_text('recovered collector\n')
+    manifest['sources']['collector.py'] = digest(source)
+    (collection/'manifest.json').write_text(json.dumps(manifest))
+    validate_collection_provenance(experiment, collection, split)
+    newer = row.with_name('sample-1.json')
+    newer.write_text('{}')
+    with pytest.raises(ValueError, match='resumed collection provenance'):
+        validate_source_transition(collection)
+    newer.write_text(json.dumps(dict(collection_manifest_sha256=digest(collection/'manifest.json'))))
+    validate_source_transition(collection)
+    row.write_text('{"original":false}')
+    with pytest.raises(ValueError, match='Retained trace changed'):
+        validate_source_transition(collection)

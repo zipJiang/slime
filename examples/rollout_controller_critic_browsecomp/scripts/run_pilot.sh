@@ -57,7 +57,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --seq-length 32768 --use-dynamic-batch-size --max-tokens-per-gpu 24576 --balance-data \
   --attention-dropout 0 --hidden-dropout 0 --attention-backend flash \
   --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
-  --sglang-mem-fraction-static 0.75 --sglang-context-length 32768 \
+  --sglang-mem-fraction-static 0.75 --sglang-context-length 65536 \
   --sglang-max-running-requests 24 --sglang-cuda-graph-max-bs 24 \
   --pilot-candidate "$candidate" --pilot-context-source "$experiment_root/scripts/collect.py" \
   --pilot-schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \

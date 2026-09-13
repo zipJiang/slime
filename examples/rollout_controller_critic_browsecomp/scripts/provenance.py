@@ -23,6 +23,44 @@ def function_sha256(path, name):
     return hashlib.sha256(segment.encode()).hexdigest()
 
 
+def validate_source_transition(collection):
+    """Keep pre-recovery traces tied to their archived collection protocol."""
+    collection = Path(collection).resolve()
+    manifest = json.loads((collection/'manifest.json').read_text())
+    transition = manifest.get('source_transition')
+    if transition is None:
+        return
+
+    def inside(relative):
+        path = (collection/relative).resolve()
+        if not path.is_relative_to(collection):
+            raise ValueError(f'Recovery path escapes collection: {relative}')
+        return path
+
+    previous = inside(transition['previous_manifest'])
+    inventory = inside(transition['retained_inventory'])
+    if sha256(previous) != transition['previous_manifest_sha256'] or sha256(inventory) != transition['retained_inventory_sha256']:
+        raise ValueError('Recovery provenance checksum mismatch')
+    old = json.loads(previous.read_text())
+    if old['split_sha256'] != manifest['split_sha256']:
+        raise ValueError('Recovery changed the question split')
+    for relative, expected in old['sources'].items():
+        archived = inside(str(previous.parent.relative_to(collection)/'sources'/relative))
+        if sha256(archived) != expected:
+            raise ValueError(f'Archived collection source differs: {relative}')
+    retained = json.loads(inventory.read_text())
+    for relative, expected in retained.items():
+        if sha256(inside(relative)) != expected:
+            raise ValueError(f'Retained trace changed after recovery: {relative}')
+    current = sha256(collection/'manifest.json')
+    for lane in ['train', 'validation']:
+        for path in (collection/lane).glob('*/sample-*.json'):
+            if path.name.endswith('.failure.json') or str(path.relative_to(collection)) in retained:
+                continue
+            if json.loads(path.read_text()).get('collection_manifest_sha256') != current:
+                raise ValueError(f'Trace lacks the resumed collection provenance: {path}')
+
+
 def validate_collection_provenance(experiment, collection, split_path):
     experiment=Path(experiment).resolve()
     collection=Path(collection).resolve()
@@ -42,6 +80,7 @@ def validate_collection_provenance(experiment, collection, split_path):
     infrastructure=collection/'infrastructure-manifest.json'
     if not infrastructure.is_file():
         raise ValueError('Missing collection infrastructure manifest')
+    validate_source_transition(collection)
     return dict(split_sha256=manifest['split_sha256'],sources=checked,
                 manifest_sha256=sha256(collection/'manifest.json'),
                 infrastructure_manifest_sha256=sha256(infrastructure))

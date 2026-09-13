@@ -74,7 +74,7 @@ def main():
     vllm=str(EXPERIMENT.parents[2]/'vllm/.venv/bin/vllm')
     start('actor',step(384912,'actor',24,[*common,'CUDA_VISIBLE_DEVICES=0,1',vllm,'serve',str(BASE),
         '--served-model-name','Qwen/Qwen3.5-9B','--tensor-parallel-size','2','--enforce-eager',
-        '--max-model-len','32768','--enable-prefix-caching','--mamba-cache-mode','all',
+        '--max-model-len','65536','--enable-prefix-caching','--mamba-cache-mode','all',
         '--gpu-memory-utilization','.88','--max-num-seqs','64','--host','0.0.0.0','--port','8130']))
     old=ROOT/'data/browsercomp-plus/ppo-planning-20260912/cache8'
     (old/'STOP').touch()

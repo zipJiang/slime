@@ -10,6 +10,7 @@ import sys
 EXPERIMENT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(EXPERIMENT/'snapshots/harness'))
 from collect import context, write
+from provenance import validate_source_transition
 from examples.browsercomp_plus.env import RetrievalArchive, SearchEnv
 from transformers import AutoTokenizer
 
@@ -18,6 +19,7 @@ def audit(root):
     manifest=json.loads((root/'manifest.json').read_text())
     for name,sha in manifest['sources'].items():
         assert hashlib.sha256((EXPERIMENT/name).read_bytes()).hexdigest()==sha, name
+    validate_source_transition(root)
     tokenizer=AutoTokenizer.from_pretrained(manifest['actor'],local_files_only=True)
     tools=SearchEnv(RetrievalArchive()).schemas
     expected={(lane,case_id,sample)

@@ -6,6 +6,7 @@ from step_controller.harness.compaction.base import Compactor
 from step_controller.harness.runner import Runner
 
 CONTEXT_LIMIT = 32768
+FOLD_OVERFLOW_LIMIT = 65536
 
 
 class BoundedFoldRunner(Runner):
@@ -23,7 +24,14 @@ class BoundedFoldRunner(Runner):
 
     async def _generate_turn(self, rs, messages, cond, *, sampling_params, ending):
         params = self._params(sampling_params)
-        available = CONTEXT_LIMIT - len(cond.tokens)
+        # A rendered transcript or the forced-final prompt can already exceed
+        # the normal window. Only final summaries may use the overflow reserve;
+        # advance() still ends ordinary fold interaction at the original limit.
+        limit = CONTEXT_LIMIT
+        if ending and len(cond.tokens) + params.max_tokens > CONTEXT_LIMIT:
+            limit = FOLD_OVERFLOW_LIMIT
+            logging.getLogger(__name__).info('Using fold final-summary reserve: %d tokens', len(cond.tokens))
+        available = limit - len(cond.tokens)
         if available <= 0:
             raise ValueError('Fold input exceeds context window; refusing prompt truncation')
         if available < params.max_tokens:

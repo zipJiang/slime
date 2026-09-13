@@ -16,6 +16,23 @@ of at least 0.8. This is a lexical check, not an exhaustive semantic duplicate a
 
 ## Execution
 
+September 13 recovery: the original collector stopped after 577 completed traces
+when one fold's final-summary prompt exceeded 32K. The saved traces passed exact
+snapshot/context readback (6,412 contexts; maximum 5,007 tokens). Normal fold
+interaction retains its 32K threshold; final summaries can now use a 64K overflow
+window without truncating conditioning. Collection and pilot servers support this
+window; critic conditioning remains limited to 32K. Episode failures now drain
+other in-flight work before failing collection, and never become negative labels.
+
+Run `base-v2` records this source transition in its collection manifest. Original
+sources, infrastructure, manifest, and the retained-summary hash inventory are in
+`collection/recovery/overflow-v1/`; prior supervisor logs and terminal state are in
+`recovery/overflow-v1/`. New traces carry the resumed manifest hash. Both readback
+and the training boundary verify provenance across the transition. Recovery
+collection supervisor is **401517**; waiting training supervisor is **401518**.
+Inspect these live handles before launching anything else. The 100 CPU tests pass,
+including preservation of overflow prompts and draining work after a failure.
+
 - Collection uses gh129's two GPUs for a TP=2 base actor, gh101 GPU 0 for dense
   retrieval, and gh101 GPU 1 for the frozen 27B answer judge.
 - After collection and exact snapshot readback, those same four GPUs form two
