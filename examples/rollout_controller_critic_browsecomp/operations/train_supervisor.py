@@ -8,8 +8,11 @@ import collect_supervisor as ops
 
 
 def job_active(job):
-    result=subprocess.run(['squeue','-h','-j',str(job),'-o','%T'],capture_output=True,text=True,check=True)
-    return bool(result.stdout.strip())
+    # A completed job can age out of squeue and make -j return exit status 1.
+    # Listing our active jobs distinguishes absence from a failed Slurm query.
+    result=subprocess.run(['squeue','-h','-u',str(os.getuid()),'-o','%A'],
+        capture_output=True,text=True,check=True)
+    return str(job) in result.stdout.split()
 
 
 def main():

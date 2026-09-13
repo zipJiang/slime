@@ -29,7 +29,12 @@ sources, infrastructure, manifest, and the retained-summary hash inventory are i
 `collection/recovery/overflow-v1/`; prior supervisor logs and terminal state are in
 `recovery/overflow-v1/`. New traces carry the resumed manifest hash. Both readback
 and the training boundary verify provenance across the transition. Recovery
-collection supervisor is **401517**; waiting training supervisor is **401586**.
+collection supervisor **401517** completed successfully at 11:01 EDT. All 640
+traces passed exact readback: 7,195 contexts, 6,688 folds, 153 successful episodes,
+maximum critic context 5,007 tokens. Current eight-GPU training supervisor is
+**401818**. Job 401586 failed before initialization while JSON-serializing a
+native enum; 401812 failed on an aged-out completed-job squeue lookup. Both
+startup bugs are fixed, with original failure records under `recovery/`.
 The former four-GPU waiter 401518 was canceled before training to expand this
 stage to eight GPUs at the user's request. New allocations 401530 (gh106) and
 401540 (gh108), two H100s each, expire September 16 around 09:30 EDT. Four-GPU
