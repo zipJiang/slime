@@ -216,6 +216,9 @@ pass for topology, preflight, and promotion, and the native scheduler preserves
 all sample identities and question weights at DP=1 and DP=2. The two-GPU trainer
 still requires live memory verification; no pilot has run yet.
 
+`PILOT_CRITIC_LR` overrides the pilot critic learning rate (default 5e-6).
+The pilot following `training-refine-lr1e6-v1` uses 1e-6, matching refinement.
+
 The supervisor validates allocation size and separation, performs the shared
 CPU preflight, starts and probes both auxiliary services and the five- or seven-GPU Ray
 cluster, runs exactly two sequential joint updates, and tears down only the child

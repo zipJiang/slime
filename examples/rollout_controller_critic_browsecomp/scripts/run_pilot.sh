@@ -62,6 +62,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --sglang-mem-fraction-static 0.75 --sglang-context-length 65536 \
   --sglang-max-running-requests 24 --sglang-cuda-graph-max-bs 24 \
   --pilot-candidate "$candidate" --pilot-context-source "$experiment_root/scripts/collect.py" \
+  --pilot-critic-lr "${PILOT_CRITIC_LR:-5e-6}" \
   --pilot-schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \
   --pilot-cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
   --pilot-retriever-code /projects/bvandur1/zjiang31/browsecomp-plus-retriever \
