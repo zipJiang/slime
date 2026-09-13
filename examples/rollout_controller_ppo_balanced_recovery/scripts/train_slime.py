@@ -43,6 +43,7 @@ def custom_args(parser):
     parser.add_argument('--ppo-replay-initial-batch')
     parser.add_argument('--ppo-replay-warmup-run')
     parser.add_argument('--ppo-retry-batch-run')
+    parser.add_argument('--ppo-offload-actor-moments', action='store_true')
     parser.add_argument('--ppo-optimizer-replay-tolerance', type=float, default=1e-5)
     parser.add_argument('--ppo-execution', choices=['sync', 'overlap'], default='sync')
     parser.add_argument('--ppo-critic-replica-host', default='172.16.203.30')
@@ -104,7 +105,13 @@ def train(args):
         raise RuntimeError('Primary experiment tracking did not initialize')
     actor_args.wandb_run_id = critic_args.wandb_run_id = args.wandb_run_id
     manager, _ = create_rollout_manager(args, pgs['rollout'])
-    actor, actor_starts = create_actor_model(actor_args, pgs, manager)
+    actor_cls = None
+    if args.ppo_offload_actor_moments:
+        if resume is None:
+            raise ValueError('Actor moment offload requires a native optimizer resume')
+        from memory_actor import MemoryBoundActor
+        actor_cls = MemoryBoundActor
+    actor, actor_starts = create_actor_model(actor_args, pgs, manager, actor_cls=actor_cls)
     critic_args.save = str(run/'critic')
     critic_args.save_hf = None
     critic_args.load = args.ppo_critic_load or args.hf_checkpoint

@@ -114,3 +114,21 @@ replacement's first completed actor update and native restore audit, and only
 when the old allocation has no active steps. Fourteen focused allocation, port,
 and migration-boundary tests pass. Inspect live reports before claiming migration
 or allocation return is complete.
+
+
+On the 94 GB trainer, restore and chunked reference scoring fit but a later
+backward microbatch exceeded memory while Megatron upcast full logits to FP32.
+For a paired native resume, supervisor `--offload-actor-moments` enables
+`MemoryBoundActor`: the existing Megatron state offloader stores only Adam's
+first and second moments on the CPU during actor forward/backward, then restores
+them synchronously before the unchanged GPU optimizer step. Master weights,
+model precision, long sequences, global batch, learning rates, and checkpoint
+format are unchanged. The feature is opt-in and requires initialized native Adam
+history; it must not be combined with native optimizer-state offload. Cleanup
+restores moments before checkpoint/export and model-sleep lifecycle operations.
+
+CUDA regression coverage is in `tests/test_ppo_optimizer_memory_gpu.py` and
+requires the pinned SIF, bundled cuDNN wrapper, and the same torch-memory-saver
+LD_PRELOAD/TMS_INIT_ENABLE/TMS_INIT_ENABLE_CPU_BACKUP settings as native Ray
+actors. It checks exact restored moments/updated parameters, freed GPU storage,
+early-return/error cleanup, chained optimizers, and memory-saver pause/resume.

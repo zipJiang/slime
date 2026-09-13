@@ -19,6 +19,7 @@ parser.add_argument('--critic-gpu', type=int,
     help='physical GPU index when the critic uses a separate allocation')
 parser.add_argument('--resume-run', type=Path, required=True)
 parser.add_argument('--retry-batch-run', type=Path)
+parser.add_argument('--offload-actor-moments', action='store_true')
 parser.add_argument('--stop-after-round', type=int)
 parser.add_argument('--resume-after-job', type=int,
     help='automatically release GO after this supervisor completes with an audited paused checkpoint')
@@ -115,6 +116,8 @@ try:
         driver_args += ['--ppo-stop-after-round',str(args.stop_after_round)]
     if args.retry_batch_run is not None:
         driver_args += ['--ppo-retry-batch-run',str(args.retry_batch_run.resolve())]
+    if args.offload_actor_moments:
+        driver_args += ['--ppo-offload-actor-moments']
     preflight = subprocess.run(step(head,'preflight',
         [*environment,*driver_args,'--ppo-preflight-only']),
         capture_output=True,text=True)
