@@ -28,7 +28,8 @@ class SupervisorTest(unittest.TestCase):
                 processes[name]=proc
                 return proc
             env=dict(CRITIC_TRAIN_JOBS='901:902',CRITIC_TRAIN_OUTPUT=str(training),
-                CRITIC_TRAIN_OPERATIONS=str(operation),SLURM_JOB_ID='900')
+                CRITIC_TRAIN_OPERATIONS=str(operation),SLURM_JOB_ID='900',
+                CRITIC_TRAIN_EXTRA_ARGS='["--lr", "1e-6"]')
             with patch.dict(os.environ,env), patch.object(supervisor.ops,'OUT',base), \
                  patch.object(supervisor.ops,'processes',processes), \
                  patch.object(supervisor.ops,'start',start), \
@@ -44,6 +45,7 @@ class SupervisorTest(unittest.TestCase):
             self.assertIn('172.16.99.1:6475',commands['ray-worker-902'])
             self.assertIn('RAY_ADDRESS=172.16.99.1:6475',commands['driver'])
             self.assertIn(f'CRITIC_TRAIN_OUTPUT={training}',commands['driver'])
+            self.assertEqual(commands['driver'][-2:],['--lr','1e-6'])
             self.assertTrue((operation/'complete.json').exists())
             self.assertFalse((base/'training').exists())
             self.assertEqual(json.loads((operation/'supervisor.json').read_text())['gpu_jobs'],[901,902])

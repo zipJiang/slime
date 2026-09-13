@@ -48,6 +48,7 @@ def custom_args(parser):
     parser.add_argument('--critic-epochs',type=int,default=1)
     parser.add_argument('--critic-preflight-only',action='store_true')
     parser.add_argument('--critic-reload-tolerance',type=float,default=1e-5)
+    parser.add_argument('--critic-eval-interval',type=int,default=0)
     return parser
 
 
@@ -76,6 +77,8 @@ def run(args):
     configure_logger()
     if not math.isfinite(args.critic_reload_tolerance) or args.critic_reload_tolerance<0:
         raise ValueError('Reload tolerance must be finite and nonnegative')
+    if args.critic_eval_interval<0:
+        raise ValueError('Evaluation interval cannot be negative')
     out=Path(args.save).parent
     out.mkdir(parents=True,exist_ok=True)
     if (out/'recipe.json').exists(): raise ValueError('Use a fresh training output for each attempt')
@@ -166,6 +169,10 @@ def run(args):
         step+=1
         status(out,'training',updates=step,total_updates=len(order)//args.global_batch_size,
                last_update_seconds=time.time()-started)
+        if (args.critic_eval_interval and step%args.critic_eval_interval==0
+                and start+args.global_batch_size<len(order)):
+            status(out,'intermediate-evaluation',updates=step)
+            evaluate(f'update-{step:04d}')
     status(out,'trained-evaluation',updates=step)
     final,predictions=evaluate('trained')
     status(out,'native-save',updates=step,iteration=step-1)

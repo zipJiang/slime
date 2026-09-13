@@ -26,6 +26,9 @@ def main():
     ops.OUT.mkdir(parents=True,exist_ok=False)
     operation_started=True
     jobs=[int(job) for job in os.environ.get('CRITIC_TRAIN_JOBS','360839:384912').split(':')]
+    extra_args=json.loads(os.environ.get('CRITIC_TRAIN_EXTRA_ARGS','[]'))
+    if not isinstance(extra_args,list) or any(not isinstance(arg,str) for arg in extra_args):
+        raise ValueError('CRITIC_TRAIN_EXTRA_ARGS must be a JSON array of CLI strings')
     if len(jobs) not in (2,4) or len(set(jobs))!=len(jobs):
         raise ValueError('Expected two or four distinct two-GPU allocations')
     hosts=[job_node(job) for job in jobs]
@@ -35,7 +38,7 @@ def main():
     ops.write('supervisor.json',dict(job=os.environ['SLURM_JOB_ID'],host=os.uname().nodename,
         pid=os.getpid(),cgroup=Path('/proc/self/cgroup').read_text(),started=time.time(),
         gpu_jobs=jobs,training_gpus=2*len(jobs),hosts=hosts,address=address,
-        training_output=str(training)))
+        training_output=str(training),extra_args=extra_args))
     collection_job=json.loads((base/'supervisor.json').read_text())['job']
     until=time.monotonic()+20*3600
     while not (base/'collection-finished.json').exists():
@@ -80,7 +83,7 @@ def main():
     else: raise RuntimeError(f'{2*len(jobs)}-GPU Ray cluster did not become ready')
     driver=ops.start('driver',ops.step(jobs[0],'train-driver',4,['env',f'CRITIC_RUN_ROOT={base}',
         f'CRITIC_TRAIN_NODES={len(jobs)}',f'CRITIC_TRAIN_OUTPUT={training}',
-        f'RAY_ADDRESS={address}','bash',str(scripts/'run_train.sh')]))
+        f'RAY_ADDRESS={address}','bash',str(scripts/'run_train.sh'),*extra_args]))
     while driver.poll() is None:
         if (base/'STOP').exists(): raise RuntimeError('STOP requested')
         for name in ['ray-head',*workers]:
