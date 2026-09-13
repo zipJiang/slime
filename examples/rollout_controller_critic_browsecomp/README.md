@@ -41,13 +41,21 @@ reduced same-batch MSE from 0.2179 to 0.0900, and sleep/wake preserved all updat
 predictions exactly. This motivated a lower-rate refinement, not a declaration
 that the critic is ready.
 
-Current supervisor **402798** uses gh106/gh108 (four H100s) and gh203/gh205 (four
-H200s), separate from PPO. It initializes model-only from critic checkpoint 15,
-resets optimizer/RNG/cursor, and makes another 16-update pass at LR **1e-6** with
-held-out validation every four updates. Outputs are under
-`runs/base-v2/training-refine-lr1e6-v1`; sibling operations end in `-operations`.
-At September 13, 12:58 EDT, initialization and baseline validation completed;
-new training is starting. Inspect the live job and output before launching a replacement.
+Refinement supervisor **402798** completed on September 13 at 13:40 EDT. It used
+gh106/gh108 (four H100s) and gh203/gh205 (four H200s), separate from PPO, to make
+another 16-update pass at LR **1e-6** from critic checkpoint 15 with fresh optimizer
+state. Outputs are under `runs/base-v2/training-refine-lr1e6-v1`; sibling operations
+end in `-operations`. Final held-out MSE is **0.08692385**, versus the constant's
+**0.10955276**. The final improvement bootstrap interval narrowly crosses zero,
+and initial-state predictions remain overconfident; the gains are in fold states.
+
+Full checkpoint readback passes, model-only reload reproduces all 1,428 predictions
+exactly with fresh optimizer/cursor state on eight ranks, and portable inference
+matches native values within **0.00409136** on 64 held-out contexts. The generated
+`warmstart-candidate.json` passes independent reconstruction from its evidence.
+Pilot supervisor **402969** has started `browsecomp-zero-warmup-refine-lr1e6-v1`,
+passed CPU preflight, and is starting its auxiliary services. The pilot has not
+yet verified live trainer memory fit or zero-warmup updates.
 
 - `CRITIC_TRAIN_JOBS` supplies two or four distinct two-GPU allocations. The head
   IP and training host count are derived from those allocations.
@@ -111,7 +119,8 @@ Calibration uses the same equal-question, equal-checkpoint-within-question measu
 as optimization. A paired question bootstrap reports uncertainty in improvement
 over the training-fitted constant.
 
-Expected files under `runs/base-v2/training/`:
+Validated refinement files under `runs/base-v2/training-refine-lr1e6-v1/`
+(the original failed run remains under `runs/base-v2/training/`):
 
 - `dataset-inventory.json`: every aggregated context hash, question, target,
   observation count, and root/fold position used by training or validation.
@@ -178,13 +187,16 @@ hosts, including five two-GPU allocations (nine GPUs used, one unused). Artifact
 `/weka/projects/bvandur1/zjiang31/browsecomp-critic-ppo/runs`, linked from this
 experiment's `runs/` directory. The supervisor requires at least 300 GiB free.
 
-After `runs/base-v2/training/warmstart-candidate.json` exists, launch the pilot
-from a CPU batch job with already-running single-host allocation IDs:
+The current candidate is
+`runs/base-v2/training-refine-lr1e6-v1/warmstart-candidate.json`. For another pilot,
+use a fresh run name and a CPU batch job with already-running single-host allocations:
 
 ```bash
 export CRITIC_EXPERIMENT_ROOT=/weka/scratch/jhu/bvandur1/zjiang31/slime-ppo-worktree/examples/rollout_controller_critic_browsecomp
+export PILOT_CRITIC_LR=1e-6
 sbatch operations/pilot.sbatch \
   --run-name browsecomp-zero-warmup-pilot-v1 \
+  --candidate "$CRITIC_EXPERIMENT_ROOT/runs/base-v2/training-refine-lr1e6-v1/warmstart-candidate.json" \
   --train-job TRAIN_JOB --inference-job INFERENCE_JOB --aux-job AUX_JOB \
   --deadline-unix UNIX_TIMESTAMP
 ```
@@ -195,6 +207,7 @@ add `--replica-job` for the portable critic host:
 ```bash
 sbatch operations/pilot.sbatch \
   --run-name browsecomp-zero-warmup-pilot-v1 \
+  --candidate "$CRITIC_EXPERIMENT_ROOT/runs/base-v2/training-refine-lr1e6-v1/warmstart-candidate.json" \
   --train-job TRAIN_A --train-job TRAIN_B \
   --inference-job ROLLOUT_JOB --replica-job CRITIC_JOB --aux-job AUX_JOB \
   --deadline-unix UNIX_TIMESTAMP
@@ -214,7 +227,7 @@ sbatch operations/pilot.sbatch \
 Both layouts retain six questions and one update per batch. Thirty focused tests
 pass for topology, preflight, and promotion, and the native scheduler preserves
 all sample identities and question weights at DP=1 and DP=2. The two-GPU trainer
-still requires live memory verification; no pilot has run yet.
+still requires live memory verification; the first pilot is starting.
 
 `PILOT_CRITIC_LR` overrides the pilot critic learning rate (default 5e-6).
 The pilot following `training-refine-lr1e6-v1` uses 1e-6, matching refinement.
