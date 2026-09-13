@@ -83,7 +83,9 @@ def build_candidate(training, *, base_model, context_source_file_sha256,
             or readback['optimizer_steps']!=[native['updates']]
             or not readback['full_storage_read'] or not readback['finite_tensors']):
         raise ValueError('Native checkpoint readback does not match the trained critic')
-    if (reload['cursors']!=[0,0,0,0]
+    world_size=reload.get('world_size',4)
+    if (world_size not in (4,8) or reload['cursors']!=[0]*world_size
+            or len(reload['optimizers'])!=world_size
             or not reload['passed']
             or not all(item['fresh'] for item in reload['optimizers'])
             or not reload['finetune'] or not reload['no_load_optim'] or not reload['no_load_rng']):

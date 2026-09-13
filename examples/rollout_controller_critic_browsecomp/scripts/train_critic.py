@@ -1,4 +1,4 @@
-"""Native TP=2, DP=2 critic pretraining, validation, and weight-only reload audit."""
+"""Native TP=2 critic pretraining, validation, and weight-only reload audit."""
 import copy
 import hashlib
 import json
@@ -49,20 +49,21 @@ def custom_args(parser):
     return parser
 
 
-def placement():
+def placement(num_hosts):
     # Reserve two GPUs on each host explicitly; every adjacent TP pair stays local.
     nodes=[n for n in ray.nodes() if n['Alive'] and n['Resources'].get('browsecomp_critic_train',0)>=2]
-    if len(nodes)!=2: raise ValueError('Expected exactly two dedicated critic hosts')
+    if len(nodes)!=num_hosts: raise ValueError(f'Expected exactly {num_hosts} dedicated critic hosts')
+    world_size = num_hosts * 2
     hosts=sorted(n['NodeManagerAddress'] for n in nodes)
     bundles=[dict(CPU=1,GPU=1,**{f'node:{host}':.001}) for host in hosts for _ in range(2)]
     pg=placement_group(bundles,strategy='PACK')
     ray.get(pg.ready(),timeout=180)
     actors=[InfoActor.options(scheduling_strategy=PlacementGroupSchedulingStrategy(
-        placement_group=pg,placement_group_bundle_index=i)).remote() for i in range(4)]
+        placement_group=pg,placement_group_bundle_index=i)).remote() for i in range(world_size)]
     physical=ray.get([a.get_ip_and_gpu_id.remote() for a in actors])
     for actor in actors: ray.kill(actor)
-    order=sorted(range(4),key=lambda i:(physical[i][0],int(physical[i][1])))
-    for offset in [0,2]:
+    order=sorted(range(world_size),key=lambda i:(physical[i][0],int(physical[i][1])))
+    for offset in range(0,world_size,2):
         pair=[physical[i] for i in order[offset:offset+2]]
         if pair[0][0]!=pair[1][0] or len({int(p[1]) for p in pair})!=2:
             raise ValueError('TP pair crosses hosts or repeats a GPU')
@@ -111,13 +112,15 @@ def run(args):
     write(out/'dataset-inventory.json',dataset_inventory(data))
     status(out,'native-initialization',train_questions=len({r['group_index'] for r in data['train']}),
            validation_questions=len({r['group_index'] for r in data['validation']}))
-    pg,physical=placement()
+    num_hosts=args.actor_num_nodes
+    world_size=num_hosts*2
+    pg,physical=placement(num_hosts)
     write(out/'placement.json',physical)
-    critic=allocate_train_group(args,2,2,pg,role='critic',actor_cls=CheckpointCriticActor)
+    critic=allocate_train_group(args,num_hosts,2,pg,role='critic',actor_cls=CheckpointCriticActor)
     starts=critic.create()
-    if starts != [0]*4: raise ValueError('Fresh critic must start at rollout zero on all ranks')
+    if starts != [0]*world_size: raise ValueError('Fresh critic must start at rollout zero on all ranks')
     tokenizer=AutoTokenizer.from_pretrained(args.hf_checkpoint,local_files_only=True)
-    parallel=dict(dp_size=2,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
+    parallel=dict(dp_size=num_hosts,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
     def scorer_for(group):
         return CriticScorer(group._actor_handlers,args,parallel,tokenizer,tokenizer.eos_token_id)
     scorer=scorer_for(critic)
@@ -181,17 +184,17 @@ def run(args):
     warm.load=args.save;warm.ckpt_step=step-1
     warm.finetune=True;warm.no_load_optim=True;warm.no_load_rng=True
     status(out,'weight-only-reload',updates=step,iteration=step-1)
-    loaded=allocate_train_group(warm,2,2,pg,role='critic',actor_cls=CheckpointCriticActor)
+    loaded=allocate_train_group(warm,num_hosts,2,pg,role='critic',actor_cls=CheckpointCriticActor)
     cursors=loaded.create()
-    if cursors != [0]*4: raise ValueError('Weight-only warmstart retained the pretraining cursor')
+    if cursors != [0]*world_size: raise ValueError('Weight-only warmstart retained the pretraining cursor')
     optimizers=ray.get([a.audit_optimizer_start.remote() for a in loaded._actor_handlers])
-    if len(optimizers)!=4 or not all(report['fresh'] for report in optimizers):
+    if len(optimizers)!=world_size or not all(report['fresh'] for report in optimizers):
         raise ValueError('Weight-only warmstart restored optimizer/scheduler history')
     scorer=scorer_for(loaded)
     reloaded,reloaded_predictions=evaluate('weight-only-reload')
     error=max(abs(a-b) for a,b in zip(predictions,reloaded_predictions,strict=True))
     write(out/'reload-audit.json',dict(max_abs_error=error,passed=error<=1e-5,
-        cursors=cursors,optimizers=optimizers,finetune=True,no_load_optim=True,no_load_rng=True))
+        world_size=world_size,cursors=cursors,optimizers=optimizers,finetune=True,no_load_optim=True,no_load_rng=True))
     if error>1e-5: raise ValueError('Weight-only critic reload changed predictions')
     loaded.release()
     write(out/'native-validated.json',dict(updates=step,checkpoint=args.save,iteration=step-1,
@@ -243,7 +246,7 @@ def main():
         from types import SimpleNamespace
         records=[dict(tokens=[1,2,3],response_length=1,reward=float(i%2),loss_mask=[1],
             group_index=i,metadata=dict(lane='critic',node_id=i)) for i in range(args.global_batch_size)]
-        parallel=dict(dp_size=2,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
+        parallel=dict(dp_size=args.actor_num_nodes,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
         packets=partition_data(args,parallel,training_data(records,lane='critic',
             expected_groups=range(args.global_batch_size)))
         print(json.dumps(dict(preflight_passed=True,dp_packets=len(packets),

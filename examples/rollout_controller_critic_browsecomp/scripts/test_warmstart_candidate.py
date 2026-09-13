@@ -50,6 +50,22 @@ def test_candidate_encodes_fresh_model_only_load_and_requires_pilot(tmp_path):
     assert require_pilot_candidate(path)['critic']['expected_rollout_cursor']==0
 
 
+def test_eight_rank_pretraining_can_create_fresh_warmstart_candidate(tmp_path):
+    training=fixture(tmp_path)
+    reload=json.loads((training/'reload-audit.json').read_text())
+    reload.update(world_size=8,cursors=[0]*8,optimizers=[dict(fresh=True)]*8)
+    write(training/'reload-audit.json',reload)
+    candidate=build_candidate(training,base_model=tmp_path/'base',
+        context_source_file_sha256='a'*64,context_function_sha256='e'*64)
+    path=training/'warmstart-candidate.json';write(path,candidate)
+    assert require_pilot_candidate(path)['ready_for_zero_warmup_pilot']
+    reload['optimizers'].pop()
+    write(training/'reload-audit.json',reload)
+    with pytest.raises(ValueError,match='fresh optimizer'):
+        build_candidate(training,base_model=tmp_path/'base',
+            context_source_file_sha256='a'*64,context_function_sha256='e'*64)
+
+
 def test_offline_quality_failure_cannot_start_zero_warmup_pilot(tmp_path):
     training=fixture(tmp_path,better=False)
     candidate=build_candidate(training,base_model=tmp_path/'base',context_source_file_sha256='b'*64,

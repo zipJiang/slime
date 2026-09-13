@@ -29,14 +29,23 @@ sources, infrastructure, manifest, and the retained-summary hash inventory are i
 `collection/recovery/overflow-v1/`; prior supervisor logs and terminal state are in
 `recovery/overflow-v1/`. New traces carry the resumed manifest hash. Both readback
 and the training boundary verify provenance across the transition. Recovery
-collection supervisor is **401517**; waiting training supervisor is **401518**.
+collection supervisor is **401517**; waiting training supervisor is **401586**.
+The former four-GPU waiter 401518 was canceled before training to expand this
+stage to eight GPUs at the user's request. New allocations 401530 (gh106) and
+401540 (gh108), two H100s each, expire September 16 around 09:30 EDT. Four-GPU
+NCCL collectives on the new hosts and native TP=2/DP=4 argument/packing preflight
+passed; full eight-GPU model training remains pending collection completion.
 Inspect these live handles before launching anything else. The 100 CPU tests pass,
 including preservation of overflow prompts and draining work after a failure.
 
 - Collection uses gh129's two GPUs for a TP=2 base actor, gh101 GPU 0 for dense
   retrieval, and gh101 GPU 1 for the frozen 27B answer judge.
-- After collection and exact snapshot readback, those same four GPUs form two
-  native TP=2 critic replicas (DP=2). No additional GPU allocation is required.
+- After collection and exact snapshot readback, gh101, gh129, gh106, and gh108
+  form four native TP=2 critic replicas (DP=4), eight GPUs total. Training retains
+  eight questions per optimizer batch and 16 updates for the one-pass experiment.
+- The training supervisor reads colon-separated two-GPU allocation IDs from
+  `CRITIC_TRAIN_JOBS` (current value `360839:384912:401530:401540`) and sets
+  `CRITIC_TRAIN_NODES` for the driver. The default remains the original two hosts.
 - Slurm CPU batch jobs own all service launchers. GPU steps use `--mem=0` to avoid
   inheriting the CPU supervisor's smaller memory request. Each service has its
   own process group and file log.
