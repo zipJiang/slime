@@ -18,10 +18,14 @@ This is approximate numerical agreement, not a claim of bitwise equivalence.
 
 The first recovery segment completed 24 actor and 34 critic updates, with paired
 checkpoint 33, optimizer state, question cursor, and export readbacks verified.
-`balanced-base-warmup10-recovery-v4` resumes at round 34 using two training GPUs
-on each of gh106/gh108, three actor inference GPUs across gh101/gh129, and one
-standalone critic GPU on gh129. All four training ranks and TP=2/DP=2 are retained.
-There is no repeated warmup. gh202 is available for further BrowseComp critic work.
+`balanced-base-warmup10-recovery-v4` attempted a round-34 resume with two training
+GPUs on each of gh106/gh108. Placement succeeded, but native actor optimizer load
+exceeded an 80 GB H100's memory before any update. That attempt is preserved.
+`balanced-base-warmup10-recovery-v5` uses the fallback: four H200 training GPUs
+on gh202, three actor inference GPUs across gh101/gh129, and one standalone
+critic GPU on gh129. World size four and TP=2/DP=2 are retained, with no repeated
+warmup. gh106/gh108 are available for BrowseComp work. The two-host placement
+path still needs a successful memory-feasible optimizer restore before production use.
 
 The supervisor accepts one four-GPU or two two-GPU `--train-job` arguments,
 one or more `--rollout-job` allocations (two GPUs each), a `--critic-job` from
@@ -52,10 +56,12 @@ used as warmup training targets. Target/horizon audits run again on copied data.
 The original experiment remains unchanged at
 `../rollout_controller_ppo_balanced/runs/balanced-base-v4`.
 
-Current attempt: `balanced-base-warmup10-recovery-v3`, supervisor **395325**.
-Inspect `operations/` and `runs/` for current status rather than treating launch
-as completed recovery. The independent CPU supervisor owns all GPU/CPU steps.
-Its stop deadline is September 13, 2026, 11:35 EDT.
+Current attempt: `balanced-base-warmup10-recovery-v5`, supervisor **402684**.
+At September 13, 12:27 EDT, all four ranks passed native optimizer restoration
+(actor step 24, critic step 34, scheduler samples 144/204). The supervisor passed
+its independence audit and fresh round-34 collection is active. The default stop
+request is September 13 at 17:27 EDT, before gh202 expires at 18:57 EDT.
+Inspect `operations/` and `runs/` for subsequent updates and checkpoints.
 The failed six-warmup attempt is preserved for diagnostics and made no updates.
 
 Validation: 15 resume, data-replay, and numerical-comparison tests passed; seven
@@ -74,7 +80,7 @@ uses the user-authorized 0.01 allowance for this check as well. Evidence is in
 reconstruction. Invalid probabilities, versions, context counts, or data remain
 hard failures independent of the numerical allowance.
 
-Live verification at September 12, 22:37 EDT: v3 loaded both checkpoints and
+Historical verification at September 12, 22:37 EDT: v3 loaded both checkpoints and
 reproduced all 17 initial native predictions exactly. All nine launchers passed
 the independent-supervisor cgroup audit. The first replayed batch passed its
 whole-batch target audit and optimizer replay check: maximum error 0.0018538833,
