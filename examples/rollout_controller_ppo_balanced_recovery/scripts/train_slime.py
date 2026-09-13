@@ -42,6 +42,7 @@ def custom_args(parser):
     parser.add_argument('--ppo-critic-load')
     parser.add_argument('--ppo-replay-initial-batch')
     parser.add_argument('--ppo-replay-warmup-run')
+    parser.add_argument('--ppo-retry-batch-run')
     parser.add_argument('--ppo-optimizer-replay-tolerance', type=float, default=1e-5)
     parser.add_argument('--ppo-execution', choices=['sync', 'overlap'], default='sync')
     parser.add_argument('--ppo-critic-replica-host', default='172.16.203.30')
@@ -78,6 +79,9 @@ def train(args):
     if (run/'recipe.json').exists():
         raise ValueError('Use a fresh run directory for every attempt/resume')
     actor_args, critic_args, resume = role_arguments(args)
+    if args.ppo_retry_batch_run and (resume is None or args.ppo_execution != 'overlap'
+                                   or args.ppo_replay_warmup_run):
+        raise ValueError('Failed-batch retry requires an overlapping paired-checkpoint resume')
     if args.ppo_replay_warmup_run:
         if resume is None or Path(args.ppo_replay_warmup_run).resolve() != Path(args.load).parent.resolve():
             raise ValueError('Warmup replay must follow the resumed paired checkpoint')

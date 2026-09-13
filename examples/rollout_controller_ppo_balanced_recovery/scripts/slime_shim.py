@@ -45,9 +45,12 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
         raise ValueError('Refusing stale or partial rollout reuse; start a fresh attempt directory')
     replay = not evaluation and rollout_id == 0 and args.ppo_replay_initial_batch
     warmup_replay = None
+    retry_replay = None
     if not evaluation:
         from warmup_replay import restore_batch
         warmup_replay = restore_batch(args, rollout_id, case_keys, freeze, directory)
+        from retry_batch import restore_batch as restore_retry
+        retry_replay = restore_retry(args, rollout_id, case_keys, freeze, directory)
     if replay:
         verified = json.loads((run/'replay-initial-batch-verified.json').read_text())
         source = Path(verified['source'])
@@ -55,7 +58,7 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
             raise ValueError('Replay questions do not match the fresh data cursor')
         shutil.copytree(source, directory, ignore=shutil.ignore_patterns('*audit.json', 'cost-reference.json', 'training-complete.json'))
         (directory/'replay-source.json').write_text(json.dumps(verified, indent=2)+'\n')
-    elif warmup_replay is None:
+    elif warmup_replay is None and retry_replay is None:
         directory.mkdir(parents=True, exist_ok=True)
     (directory/'collection-freeze.json').write_text(json.dumps(freeze, indent=2)+'\n')
     questions = directory/'questions.json'
@@ -73,7 +76,7 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
         command += ['--seed-namespace', f'{args.ppo_seed_namespace}/{rollout_id:04d}']
     if evaluation:
         command += ['--evaluation', '--eval-branches', str(args.n_samples_per_eval_prompt)]
-    if not replay and warmup_replay is None:
+    if not replay and warmup_replay is None and retry_replay is None:
         with (directory/'collector.log').open('w') as log:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True,
                 cwd=EXPERIMENT/'snapshots/harness', env=dict(os.environ, PYTHONPATH=str(EXPERIMENT/'snapshots/harness')))
@@ -83,8 +86,9 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False):
         seconds=time.time()-collection_started), indent=2)+'\n')
     if summary['server_weight_version'] != freeze['server_weight_version']:
         raise ValueError('Rollout behavior version changed')
-    metrics = {f'{"replayed" if warmup_replay else "collection"}_{key}': value for key, value in summary['cost'].items()}
+    metrics = {f'{"replayed" if warmup_replay or retry_replay else "collection"}_{key}': value for key, value in summary['cost'].items()}
     metrics['warmup_replay'] = int(warmup_replay is not None)
+    metrics['retry_batch'] = int(retry_replay is not None)
     metrics.update(critic_requests=summary['critic_requests'], critic_contexts=summary['critic_contexts'])
     if evaluation:
         domains = defaultdict(list)

@@ -37,6 +37,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --rollout-max-response-len 6144 \
   --advantage-estimator ppo --custom-advantage-function-path targets.prepared_advantages \
   --use-rollout-logprobs --get-mismatch-metrics \
+  --log-probs-chunk-size 1024 \
   --custom-tis-function-path audit_on_policy.metrics \
   --use-kl-loss --kl-loss-coef 0.01 --kl-loss-type low_var_kl \
   --entropy-coef 0 --eps-clip 0.2 --eps-clip-high 0.2 \
