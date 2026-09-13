@@ -63,6 +63,20 @@ def write_rows(path,rows):
     temporary.replace(path)
 
 
+def save_tree(path,state):
+    temporary=path.with_suffix(path.suffix+'.tmp')
+    with gzip.open(temporary,'wb') as stream: pickle.dump(state,stream)
+    temporary.replace(path)
+
+
+async def collect_questions(operations):
+    results=await asyncio.gather(*operations,return_exceptions=True)
+    errors=[result for result in results if isinstance(result,BaseException)]
+    if errors:
+        raise BaseExceptionGroup('Pilot questions failed after draining remaining work',errors)
+    return results
+
+
 class BatchedValueClient(AsyncRewardModel):
     def __init__(self,client,url,version,batch_size=16):
         self.client,self.url,self.version=client,url,version
@@ -141,6 +155,19 @@ def request_seed(namespace,group,question,draw):
     return int(hashlib.sha256(key.encode()).hexdigest()[:8],16)%2**31
 
 
+def make_live_runner(case,codec,policy,*,archive):
+    runner,_,workspace,prompt,compactor,tools=make_runner(case,codec,policy,
+        archive=archive,max_steps=48,compactor_temperature=1.,compactor_top_p=1.)
+    # The shared fixture builder installs an SFT replay policy whose version is
+    # "policy". Live PPO must retain the generating policy and its exact channel,
+    # including in the nested compactor runner.
+    runner._policy=policy
+    runner._compactor=ContextBoundedCompactor(compactor)
+    if not runner.policy.trainable:
+        raise ValueError('Pilot requires an exact, trainable live policy')
+    return runner,workspace,prompt,tools
+
+
 async def main(args):
     import httpx
     from transformers import AutoTokenizer
@@ -201,9 +228,7 @@ async def main(args):
                 return output
             live=SlimePolicy(post,args.url.rstrip('/')+'/generate',model=args.model,
                 format=profile,version=args.policy_version,default_params=params)
-            runner,replay,workspace,prompt,compactor,tools=make_runner(case,codec,live,
-                archive=archive,max_steps=48,compactor_temperature=1.,compactor_top_p=1.)
-            runner._compactor=ContextBoundedCompactor(compactor);replay.allow_live=True
+            runner,workspace,prompt,tools=make_live_runner(case,codec,live,archive=archive)
             judge=SemanticJudge(http,args.judge_url,case.question,case.answers,semaphore=judge_sem)
             rc=RewardConfig(value_version=args.value_version,value_prior_strength=args.prior_strength,
                 config_id=f'browsecomp-ppo-kappa-{args.prior_strength:g}')
@@ -214,6 +239,10 @@ async def main(args):
                 pass_tokens=args.pass_tokens,max_attempts=args.max_pass_attempts,
                 concurrency=args.concurrency)
             if archive.failure is not None: raise RuntimeError('Retrieval infrastructure failed')
+            # Preserve complete search evidence before recipe preparation can fail.
+            archive.save(args.output/f'group-{group:03d}.retrieval.json.gz')
+            write_json(args.output/f'group-{group:03d}.judge.json',dict(records=judge.records))
+            save_tree(args.output/f'group-{group:03d}.native.pkl.gz',state)
             prepared=prepare_samples(state,estimator=DirectBranchTdEstimator(),
                 reward_config=rc,behavior_version=args.policy_version)
             actor,critic=split_targets(to_samples(prepared,group_index=group))
@@ -226,9 +255,6 @@ async def main(args):
                         row['metadata']['terminal_boundary']=state.nodes[row['metadata']['node_id']].payload.done
                         row['metadata']['target_source']='direct_branch_mean'
                 write_rows(args.output/f'group-{group:03d}.{lane}.jsonl.gz',rows)
-            archive.save(args.output/f'group-{group:03d}.retrieval.json.gz')
-            write_json(args.output/f'group-{group:03d}.judge.json',dict(records=judge.records))
-            with gzip.open(args.output/f'group-{group:03d}.native.pkl.gz','wb') as stream: pickle.dump(state,stream)
             terminals=[node.payload for node in state.nodes.values() if node.payload.done]
             result=dict(group_index=group,query_id=question,passes=passes,cost=dict(spend),
                 actor_spans=len(actor),actor_tokens=sum(sum(r['loss_mask']) for r in actor),
@@ -238,7 +264,7 @@ async def main(args):
                 judge_calls=len(judge.records),stats=dict(state.stats),seconds=time.monotonic()-started)
             write_json(args.output/f'group-{group:03d}.json',result)
             print(json.dumps(result,allow_nan=False),flush=True);return result
-        results=await asyncio.gather(*(one(group,q) for group,q in enumerate(selected)))
+        results=await collect_questions(one(group,q) for group,q in enumerate(selected))
         write_json(args.output/'summary.json',dict(recipe_id=RECIPE_ID,
             policy_version=args.policy_version,server_weight_version=args.server_weight_version,
             value_version=args.value_version,results=results,
