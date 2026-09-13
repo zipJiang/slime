@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import time
+import traceback
 
 import ray
 from ray.util.placement_group import placement_group
@@ -172,7 +173,7 @@ def run(args):
     cursors=loaded.create()
     if cursors != [0]*4: raise ValueError('Weight-only warmstart retained the pretraining cursor')
     optimizers=ray.get([a.audit_optimizer_start.remote() for a in loaded._actor_handlers])
-    if not all(report['fresh'] for report in optimizers):
+    if len(optimizers)!=4 or not all(report['fresh'] for report in optimizers):
         raise ValueError('Weight-only warmstart restored optimizer/scheduler history')
     scorer=scorer_for(loaded)
     reloaded,reloaded_predictions=evaluate('weight-only-reload')
@@ -219,7 +220,7 @@ def run(args):
         context_function_sha256=function_sha256(EXPERIMENT/'scripts/collect.py','context')))
 
 
-if __name__=='__main__':
+def main():
     args=parse_args(custom_args)
     if args.critic_preflight_only:
         from types import SimpleNamespace
@@ -231,8 +232,18 @@ if __name__=='__main__':
         print(json.dumps(dict(preflight_passed=True,dp_packets=len(packets),
             sizes=[p['global_batch_sizes'] for p in packets],offload_train=args.offload_train,
             use_critic=args.use_critic,tf32=args.disable_tf32 if hasattr(args,'disable_tf32') else None)))
-        raise SystemExit(0)
-    ray.init(address=os.environ['RAY_ADDRESS'],runtime_env={'env_vars':{
-        'GLOO_SOCKET_IFNAME':'ens0','NCCL_SOCKET_IFNAME':'ens0','NCCL_IB_DISABLE':'1',
-        'PYTHONPATH':os.environ['PYTHONPATH']}})
-    run(args)
+        return
+    out=Path(args.save).parent
+    try:
+        ray.init(address=os.environ['RAY_ADDRESS'],runtime_env={'env_vars':{
+            'GLOO_SOCKET_IFNAME':'ens0','NCCL_SOCKET_IFNAME':'ens0','NCCL_IB_DISABLE':'1',
+            'PYTHONPATH':os.environ['PYTHONPATH']}})
+        run(args)
+    except Exception:
+        if not (out/'failed.json').exists():
+            write(out/'failed.json',dict(traceback=traceback.format_exc(),unix_time=time.time()))
+        raise
+
+
+if __name__=='__main__':
+    main()
