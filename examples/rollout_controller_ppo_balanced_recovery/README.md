@@ -88,3 +88,29 @@ mean error 0.0006199917, tolerance 0.01, critic optimizer update count two. Thre
 saved batches still need replay, then five fresh warmup rounds. The new paired
 checkpoint after replay is not yet verified. Current run tracking:
 https://wandb.ai/zipjiang/deontic-compaction-ppo/runs/p8kv76cp
+
+
+## Migration to the idle NVLs, September 13
+
+Supervisor **403770** (`balanced-base-warmup10-recovery-v6`) waits for v5 supervisor
+402684 to finish its requested drained stop. It verifies that the paired native
+checkpoints cover the paused actor/critic counters, both full tensor readbacks
+passed, and the question cursor exists before automatically releasing GO.
+It retains TP=2/DP=2, optimizer history, learning rates, and asynchronous overlap.
+
+The replacement trains on two H100 NVLs each on gh130/384963 and gh119/384964.
+A real four-rank restore probe passed for both roles; peak reserved memory was
+82.80 GiB for the actor and 75.22 GiB for the critic. These 94 GB cards fit the
+restore that failed on 80 GB H100s. Evidence: `runs/nvl-restore-probe-v1/complete.json`.
+
+Four actor rollout engines use gh101 and gh129. Critic inference uses only physical
+GPU 1 on gh108/401540; BrowseComp keeps GPU 0. A separate-cluster CUDA probe verified
+that isolation. `--critic-gpu` requires an explicit valid index for a separate
+critic allocation; its Ray worker uses a distinct dashboard agent port.
+
+`--resume-after-job 402684` gates this cutover on successful source completion and
+checkpoint audits. `--release-idle-job 360795` returns gh202 only after the
+replacement's first completed actor update and native restore audit, and only
+when the old allocation has no active steps. Fourteen focused allocation, port,
+and migration-boundary tests pass. Inspect live reports before claiming migration
+or allocation return is complete.
