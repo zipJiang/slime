@@ -21,7 +21,7 @@ for argument in "$@"; do
       --context-source "$experiment_root/scripts/collect.py" \
       --schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \
       --cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
-      --retriever-code /projects/bvandur1/zjiang31/browsecomp-plus-retriever \
+      --retriever-code /weka/projects/bvandur1/zjiang31/browsecomp-plus-retriever \
       --base-actor "$checkpoint" --updates 2 --batch-size 6 --critic-only-steps 0 \
       --train-gpus "$((train_nodes * train_gpus_per_node))" --rollout-gpus "${PILOT_ROLLOUT_GPUS:-2}" \
       --critic-replica-host "${PILOT_CRITIC_REPLICA_HOST:?}" \
@@ -65,7 +65,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --pilot-critic-lr "${PILOT_CRITIC_LR:-5e-6}" \
   --pilot-schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \
   --pilot-cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
-  --pilot-retriever-code /projects/bvandur1/zjiang31/browsecomp-plus-retriever \
+  --pilot-retriever-code /weka/projects/bvandur1/zjiang31/browsecomp-plus-retriever \
   --pilot-infrastructure-manifest "$run_root/pilot-operations/infrastructure-manifest.json" \
   --pilot-retriever-url "${PILOT_RETRIEVER_URL:?}" --pilot-judge-url "${PILOT_JUDGE_URL:?}" \
   --pilot-critic-replica-host "${PILOT_CRITIC_REPLICA_HOST:?}" \

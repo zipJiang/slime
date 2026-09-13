@@ -18,7 +18,7 @@ sys.path.insert(0,str(EXPERIMENT/'scripts'))
 from pilot_topology import allocation_plan
 CONTROLLER=EXPERIMENT.parents[2]/'rollout-controller'
 CACHE=Path('/weka/projects/bvandur1/zjiang31/.cache/huggingface')
-RETRIEVER=Path('/projects/bvandur1/zjiang31/browsecomp-plus-retriever')
+RETRIEVER=Path('/weka/projects/bvandur1/zjiang31/browsecomp-plus-retriever')
 JUDGE=CACHE/'hub/models--Qwen--Qwen3.5-27B/snapshots/fc05daec18b0a78c049392ed2e771dde82bdf654'
 children={}
 records={}
