@@ -1,0 +1,6 @@
+snapshots/
+data/
+runs/
+logs/
+operations/balanced-*/
+__pycache__/
