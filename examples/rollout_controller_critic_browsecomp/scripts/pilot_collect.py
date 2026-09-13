@@ -66,6 +66,7 @@ def write_rows(path,rows):
 
 
 def validate_infrastructure(args,infrastructure):
+    from pilot_topology import required_gpus
     if infrastructure.get('schema')!='browsecomp-zero-warmup-pilot-infrastructure-v1':
         raise ValueError('Unknown pilot infrastructure contract')
     retriever=args.retriever_code.resolve();index=(retriever/'indexes/qwen3-embedding-0.6b').resolve()
@@ -87,7 +88,7 @@ def validate_infrastructure(args,infrastructure):
             or infrastructure.get('retriever_index_sha256')!=hashes
             or Path(infrastructure.get('judge_checkpoint','')).resolve()!=JUDGE_CHECKPOINT.resolve()
             or endpoints!={infrastructure.get('ips',{}).get('aux')}
-            or required!=dict(train=4,inference=3,aux=2)
+            or required!=required_gpus(infrastructure.get('jobs',{}))
             or any(int(gpus.get(role,0))<count for role,count in required.items())):
         raise ValueError('Pilot infrastructure differs from the recorded services or resources')
 

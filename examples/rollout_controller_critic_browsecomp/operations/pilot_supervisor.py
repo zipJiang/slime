@@ -1,4 +1,4 @@
-"""Own a future nine-GPU BrowserComp zero-warmup pilot across three allocations."""
+"""Own a nine-GPU BrowserComp zero-warmup pilot across separate allocations."""
 import argparse
 import hashlib
 import json
@@ -8,11 +8,14 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import time
 import urllib.request
 
 
 EXPERIMENT=Path(os.environ['CRITIC_EXPERIMENT_ROOT']).resolve()
+sys.path.insert(0,str(EXPERIMENT/'scripts'))
+from pilot_topology import allocation_plan
 CONTROLLER=EXPERIMENT.parents[2]/'rollout-controller'
 CACHE=Path('/weka/projects/bvandur1/zjiang31/.cache/huggingface')
 RETRIEVER=Path('/projects/bvandur1/zjiang31/browsecomp-plus-retriever')
@@ -132,10 +135,12 @@ def stop(process):
 def parse_args():
     parser=argparse.ArgumentParser()
     parser.add_argument('--run-name',required=True)
-    parser.add_argument('--train-job',type=int,required=True,
-        help='running single-host allocation with at least four GPUs')
+    parser.add_argument('--train-job',type=int,action='append',required=True,
+        help='one four-GPU allocation, or repeat for two two-GPU allocations')
     parser.add_argument('--inference-job',type=int,required=True,
-        help='running single-host allocation with at least three GPUs')
+        help='three GPUs, or two GPUs when --replica-job is supplied')
+    parser.add_argument('--replica-job',type=int,
+        help='optional separate allocation for the one-GPU portable critic')
     parser.add_argument('--aux-job',type=int,required=True,
         help='running single-host allocation with at least two GPUs')
     parser.add_argument('--candidate',type=Path,
@@ -157,15 +162,14 @@ def main():
         raise RuntimeError(f'Pilot storage has {free} bytes free; {required_free} required')
     ops=run/'pilot-operations'
     ops.mkdir(parents=True)
-    jobs=dict(train=args.train_job,inference=args.inference_job,aux=args.aux_job)
+    jobs,required=allocation_plan(args.train_job,args.inference_job,args.aux_job,args.replica_job)
     hosts={role:job_node(job) for role,job in jobs.items()}
     gpus={role:allocated_gpus(job) for role,job in jobs.items()}
-    required=dict(train=4,inference=3,aux=2)
     if any(gpus[role]<count for role,count in required.items()):
         raise ValueError(f'Pilot allocations lack required GPUs: allocated={gpus}, required={required}')
-    if len(set(hosts.values()))!=3: raise ValueError('Pilot allocations must use three distinct hosts')
+    if len(set(hosts.values()))!=len(jobs): raise ValueError('Pilot allocations must use distinct hosts')
     ips={role:internal_ip(job) for role,job in jobs.items()}
-    if len(set(ips.values()))!=3: raise ValueError('Pilot allocation IPs are not distinct')
+    if len(set(ips.values()))!=len(jobs): raise ValueError('Pilot allocation IPs are not distinct')
     if args.deadline_unix<=time.time()+6*3600:
         raise ValueError('Pilot needs at least six hours of allocation time at launch')
     retriever_tree_clean=not bool(subprocess.check_output(
@@ -182,7 +186,8 @@ def main():
     judge_url=f'http://{ips["aux"]}:8131/v1'
     environment=['env',f'PILOT_RUN_NAME={args.run_name}',f'PILOT_CANDIDATE={args.candidate.resolve()}',
         f'PILOT_RETRIEVER_URL={retriever_url}',f'PILOT_JUDGE_URL={judge_url}',
-        f'PILOT_CRITIC_REPLICA_HOST={ips["inference"]}']
+        f'PILOT_CRITIC_REPLICA_HOST={ips.get("replica",ips["inference"])}',
+        f'PILOT_TRAIN_NODES={len(args.train_job)}',f'PILOT_TRAIN_GPUS_PER_NODE={required["train"]}']
     preflight=subprocess.run([*environment,'bash',str(EXPERIMENT/'scripts/run_pilot.sh'),
         '--pilot-preflight-only'],capture_output=True,text=True)
     (ops/'preflight.log').write_text(preflight.stdout+preflight.stderr)
@@ -201,13 +206,20 @@ def main():
     wait_http('retriever',retriever_url+'/health',retriever=True)
     wait_http('judge',judge_url+'/models')
     address=f'{ips["train"]}:6485'
-    start(ops,'ray-train',step(args.train_job,'ray-train',28,
-        ['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),'train']))
+    start(ops,'ray-train',step(jobs['train'],'ray-train',28,
+        ['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),'train','',str(required['train'])]))
     wait_log(ops,'ray-train','Ray runtime started.')
-    start(ops,'ray-inference',step(args.inference_job,'ray-inference',28,
-        ['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),'inference',address]))
-    wait_log(ops,'ray-inference','Ray runtime started.')
-    wait_ray(ops,args.train_job,address,['ray-train','ray-inference'])
+    ray_names=['ray-train']
+    for role in ['train_worker','inference','replica']:
+        if role not in jobs: continue
+        ray_role='rollout' if role=='inference' and 'replica' in jobs else role
+        name=f'ray-{role}'
+        command=['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),ray_role,address]
+        if role=='train_worker': command.append(str(required[role]))
+        start(ops,name,step(jobs[role],name,28,command))
+        ray_names.append(name)
+    for name in ray_names[1:]: wait_log(ops,name,'Ray runtime started.')
+    wait_ray(ops,jobs['train'],address,ray_names)
     index=RETRIEVER/'indexes/qwen3-embedding-0.6b'
     index_hashes={}
     for path in sorted(index.glob('*')):
@@ -225,13 +237,13 @@ def main():
         retriever_index=str(index.resolve()),retriever_index_sha256=index_hashes,
         judge_checkpoint=str(JUDGE.resolve()),
         services={name:records[name]['command'] for name in ('retriever','judge')},
-        ray={name:records[name]['command'] for name in ('ray-train','ray-inference')}))
-    driver=start(ops,'driver',step(args.train_job,'driver',4,[*environment,
+        ray={name:records[name]['command'] for name in ray_names}))
+    driver=start(ops,'driver',step(jobs['train'],'driver',4,[*environment,
         f'RAY_ADDRESS={address}','bash',str(EXPERIMENT/'scripts/run_pilot.sh')]))
     while driver.poll() is None:
         if time.time()>args.deadline_unix-1800:
             raise TimeoutError('Pilot reached its protected allocation deadline')
-        assert_alive(['retriever','judge','ray-train','ray-inference'])
+        assert_alive(['retriever','judge',*ray_names])
         write(ops,'heartbeat.json',dict(stage='pilot',unix_time=time.time()))
         time.sleep(15)
     if driver.returncode: raise RuntimeError('Pilot driver failed; inspect driver.log and run/failed.json')

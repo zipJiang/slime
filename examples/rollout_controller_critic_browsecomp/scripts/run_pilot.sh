@@ -33,7 +33,7 @@ export GLOO_SOCKET_IFNAME=ens0 NCCL_SOCKET_IFNAME=ens0
 source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
 exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/with_torch_cudnn.py" \
   python "$experiment_root/scripts/train_pilot.py" "${MODEL_ARGS[@]}" \
-  --actor-num-nodes 1 --actor-num-gpus-per-node 4 \
+  --actor-num-nodes "${PILOT_TRAIN_NODES:-1}" --actor-num-gpus-per-node "${PILOT_TRAIN_GPUS_PER_NODE:-4}" \
   --rollout-num-gpus "${PILOT_ROLLOUT_GPUS:-2}" --rollout-num-gpus-per-engine 1 \
   --num-gpus-per-node 2 --hf-checkpoint "$checkpoint" --load "$checkpoint" --ref-load "$checkpoint" \
   --save "$run_root/actor" --save-interval 2 \

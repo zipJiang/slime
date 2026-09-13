@@ -10,6 +10,17 @@ def rollout_bundle_order(physical,training,rollout):
         -host_sizes[physical[i][0]],physical[i][0],int(physical[i][1])))
 
 
+def training_bundle_order(physical,training,tp_size=2):
+    order=sorted(range(training),key=lambda i:(physical[i][0],int(physical[i][1])))
+    if len(set((ip,int(gpu)) for ip,gpu in physical[:training]))!=training:
+        raise ValueError('Training ranks repeat a physical GPU')
+    for offset in range(0,training,tp_size):
+        pair=order[offset:offset+tp_size]
+        if len(pair)!=tp_size or len({physical[i][0] for i in pair})!=1:
+            raise ValueError('Training tensor-parallel ranks must stay on one host')
+    return order
+
+
 def pinned_placement(args):
     import ray
     from ray.util.placement_group import placement_group
@@ -17,7 +28,12 @@ def pinned_placement(args):
     from slime.ray.placement_group import InfoActor
     training=args.actor_num_nodes*args.actor_num_gpus_per_node
     rollout=args.rollout_num_gpus
-    bundles=([{'CPU':1,'GPU':1,'browsecomp_pilot_train':.001} for _ in range(training)]+
+    train_hosts=sorted(node['NodeManagerAddress'] for node in ray.nodes()
+        if node['Alive'] and node['Resources'].get('browsecomp_pilot_train',0)>=args.actor_num_gpus_per_node)
+    if len(train_hosts)!=args.actor_num_nodes:
+        raise ValueError('Pilot training host count differs from configured topology')
+    bundles=([{'CPU':1,'GPU':1,'browsecomp_pilot_train':.001,f'node:{host}':.001}
+              for host in train_hosts for _ in range(args.actor_num_gpus_per_node)]+
         [{'CPU':1,'GPU':1,'browsecomp_pilot_rollout':.001} for _ in range(rollout)]+
         [{'CPU':1,'GPU':1,'browsecomp_pilot_replica':.001,
           f'node:{args.pilot_critic_replica_host}':.001}])
@@ -26,11 +42,9 @@ def pinned_placement(args):
         placement_group=pg,placement_group_bundle_index=i)).remote() for i in range(len(bundles))]
     physical=ray.get([actor.get_ip_and_gpu_id.remote() for actor in actors])
     for actor in actors: ray.kill(actor)
-    if len({ip for ip,gpu in physical[:training]})!=1:
-        raise ValueError('Training ranks must stay on one host')
     if {ip for ip,gpu in physical[:training]} & {ip for ip,gpu in physical[training:]}:
         raise ValueError('Training and inference roles must use disjoint hosts')
-    train_order=sorted(range(training),key=lambda i:int(physical[i][1]))
+    train_order=training_bundle_order(physical,training,args.tensor_model_parallel_size)
     rollout_order=rollout_bundle_order(physical,training,rollout)
     order=train_order+rollout_order;ids=[physical[i][1] for i in order]
     output=Path(args.save).parent/'placement.json';output.parent.mkdir(parents=True,exist_ok=True)

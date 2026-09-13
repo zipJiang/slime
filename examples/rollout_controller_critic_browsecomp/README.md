@@ -160,14 +160,17 @@ log probabilities, the pretrained critic prior, and the frozen semantic judge.
 `scripts/pilot_audit_batch.py` reconstructs every actor and critic record from the
 saved native tree before either optimizer may consume it.
 
-The pilot uses nine GPUs on three distinct hosts: four shared/offloaded native
-actor-and-critic trainer GPUs, two SGLang rollout GPUs plus one frozen portable
-critic replica GPU, and one retriever plus one judge GPU. Artifacts default to
+The pilot uses nine GPUs: four shared/offloaded native actor-and-critic trainer
+GPUs, two SGLang rollout GPUs, one frozen portable critic GPU, and one retriever
+plus one judge GPU. Training can use one four-GPU host or two two-GPU hosts;
+each TP pair stays on one host. The portable critic may share the inference
+allocation or use a separate allocation. This supports three to five distinct
+hosts, including five two-GPU allocations (nine GPUs used, one unused). Artifacts default to
 `/weka/projects/bvandur1/zjiang31/browsecomp-critic-ppo/runs`, linked from this
 experiment's `runs/` directory. The supervisor requires at least 300 GiB free.
 
 After `runs/base-v2/training/warmstart-candidate.json` exists, launch the pilot
-from a CPU batch job with three already-running single-host allocation IDs:
+from a CPU batch job with already-running single-host allocation IDs:
 
 ```bash
 export CRITIC_EXPERIMENT_ROOT=/weka/scratch/jhu/bvandur1/zjiang31/slime-ppo-worktree/examples/rollout_controller_critic_browsecomp
@@ -176,6 +179,21 @@ sbatch operations/pilot.sbatch \
   --train-job TRAIN_JOB --inference-job INFERENCE_JOB --aux-job AUX_JOB \
   --deadline-unix UNIX_TIMESTAMP
 ```
+
+For two-GPU allocations, repeat `--train-job` for the second training host and
+add `--replica-job` for the portable critic host:
+
+```bash
+sbatch operations/pilot.sbatch \
+  --run-name browsecomp-zero-warmup-pilot-v1 \
+  --train-job TRAIN_A --train-job TRAIN_B \
+  --inference-job ROLLOUT_JOB --replica-job CRITIC_JOB --aux-job AUX_JOB \
+  --deadline-unix UNIX_TIMESTAMP
+```
+
+Topology and CPU integration tests pass (107 total CPU tests); the flexible
+layout still needs the live pilot after critic pretraining. Eight dedicated
+BrowseComp GPUs cover pretraining, so the pilot needs one additional usable GPU.
 
 The supervisor validates allocation size and separation, performs the shared
 CPU preflight, starts and probes both auxiliary services and the seven-GPU Ray
