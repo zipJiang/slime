@@ -48,8 +48,8 @@ def build(*, candidate_path, context_source, schedule_audit, cases,
             raise ValueError(f'Pilot {kind} is missing: {path}')
     if (updates, batch_size, critic_only_steps) != (2, 6, 0):
         raise ValueError('Pilot must be exactly two six-question joint updates with zero warmup')
-    if (train_gpus, rollout_gpus) != (4, 2):
-        raise ValueError('Pilot requires four trainer GPUs and two rollout GPUs')
+    if train_gpus not in (2,4) or rollout_gpus!=2:
+        raise ValueError('Pilot requires two or four trainer GPUs and two rollout GPUs')
     if not critic_replica_host:
         raise ValueError('Pilot critic replica host is required')
     schedule = json.loads(schedule_audit.read_text())
@@ -87,7 +87,7 @@ def build(*, candidate_path, context_source, schedule_audit, cases,
         retriever_code=str(retriever_code), updates=updates, batch_size=batch_size,
         critic_only_steps=critic_only_steps, train_gpus=train_gpus,
         rollout_gpus=rollout_gpus, replica_gpus=1,
-        auxiliary_gpus=2, total_gpus=9,
+        auxiliary_gpus=2, total_gpus=train_gpus+5,
         critic_replica_host=critic_replica_host,
         retriever_url=checked_url(retriever_url, 'retriever URL'),
         judge_url=checked_url(judge_url, 'judge URL'))

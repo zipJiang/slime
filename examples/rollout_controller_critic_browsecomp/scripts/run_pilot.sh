@@ -11,6 +11,8 @@ if [[ ! -e "$run_root" && ! -L "$run_root" ]]; then
   ln -s "$storage_root/$run_name" "$run_root"
 fi
 candidate=${PILOT_CANDIDATE:-$experiment_root/runs/base-v2/training/warmstart-candidate.json}
+train_nodes=${PILOT_TRAIN_NODES:-1}
+train_gpus_per_node=${PILOT_TRAIN_GPUS_PER_NODE:-4}
 for argument in "$@"; do
   if [[ "$argument" == --pilot-preflight-only ]]; then
     exec /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/.venv/bin/python \
@@ -21,7 +23,7 @@ for argument in "$@"; do
       --cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
       --retriever-code /projects/bvandur1/zjiang31/browsecomp-plus-retriever \
       --base-actor "$checkpoint" --updates 2 --batch-size 6 --critic-only-steps 0 \
-      --train-gpus 4 --rollout-gpus "${PILOT_ROLLOUT_GPUS:-2}" \
+      --train-gpus "$((train_nodes * train_gpus_per_node))" --rollout-gpus "${PILOT_ROLLOUT_GPUS:-2}" \
       --critic-replica-host "${PILOT_CRITIC_REPLICA_HOST:?}" \
       --retriever-url "${PILOT_RETRIEVER_URL:?}" --judge-url "${PILOT_JUDGE_URL:?}"
   fi
@@ -33,7 +35,7 @@ export GLOO_SOCKET_IFNAME=ens0 NCCL_SOCKET_IFNAME=ens0
 source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
 exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/with_torch_cudnn.py" \
   python "$experiment_root/scripts/train_pilot.py" "${MODEL_ARGS[@]}" \
-  --actor-num-nodes "${PILOT_TRAIN_NODES:-1}" --actor-num-gpus-per-node "${PILOT_TRAIN_GPUS_PER_NODE:-4}" \
+  --actor-num-nodes "$train_nodes" --actor-num-gpus-per-node "$train_gpus_per_node" \
   --rollout-num-gpus "${PILOT_ROLLOUT_GPUS:-2}" --rollout-num-gpus-per-engine 1 \
   --num-gpus-per-node 2 --hf-checkpoint "$checkpoint" --load "$checkpoint" --ref-load "$checkpoint" \
   --save "$run_root/actor" --save-interval 2 \

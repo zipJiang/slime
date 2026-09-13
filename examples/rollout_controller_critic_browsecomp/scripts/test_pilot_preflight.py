@@ -43,6 +43,18 @@ def test_build_records_exact_resource_and_data_contract(tmp_path):
     assert result['lineage'] == {'mode':'pilot'}
 
 
+def test_two_training_gpus_preserve_question_and_update_contract(tmp_path):
+    candidate,kwargs=inputs(tmp_path)
+    with patch('pilot_preflight.require_pilot_candidate',return_value=candidate), \
+         patch('pilot_preflight.zero_warmup_role_arguments',return_value=(None,None,{})):
+        large=build(**kwargs)
+        small=build(**dict(kwargs,train_gpus=2))
+    assert small['total_gpus']==7
+    for key in ['schedule_batches','batch_size','updates','critic_only_steps',
+                'candidate_sha256','context_source_sha256']:
+        assert small[key]==large[key]
+
+
 @pytest.mark.parametrize('field,value',[
     ('updates',3),('batch_size',5),('critic_only_steps',1),
     ('train_gpus',3),('rollout_gpus',3),('judge_url','not-a-url')])

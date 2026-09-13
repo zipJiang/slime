@@ -41,3 +41,12 @@ def test_invalid_pilot_layouts_are_rejected():
         allocation_plan([1,4,5],2,3)
     with pytest.raises(ValueError,match='incomplete'):
         required_gpus({'train','aux'})
+
+
+def test_seven_gpu_pilot_uses_one_local_training_pair():
+    jobs,required=allocation_plan([1],2,3,4,train_gpus=2)
+    assert required==dict(train=2,inference=2,aux=2,replica=1)
+    assert sum(required.values())==7
+    assert training_bundle_order([('train',1),('train',0)],2)==[1,0]
+    with pytest.raises(ValueError,match='one host'):
+        allocation_plan([1,5],2,3,4,train_gpus=2)

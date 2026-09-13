@@ -1,4 +1,4 @@
-"""Own a nine-GPU BrowserComp zero-warmup pilot across separate allocations."""
+"""Own a seven- or nine-GPU BrowserComp pilot across separate allocations."""
 import argparse
 import hashlib
 import json
@@ -105,7 +105,7 @@ def wait_http(name,url,timeout=1800,retriever=False):
     raise TimeoutError(f'{name} service did not become ready')
 
 
-def wait_ray(root,train_job,address,names):
+def wait_ray(root,train_job,address,names,gpus):
     probe=step(train_job,'ray-check',2,['bash',str(EXPERIMENT/'scripts/sif.sh'),
         'ray','status',f'--address={address}'])
     deadline=time.monotonic()+300
@@ -113,12 +113,12 @@ def wait_ray(root,train_job,address,names):
         assert_alive(names)
         result=subprocess.run(probe,capture_output=True,text=True,timeout=120)
         (root/'ray-readiness.log').write_text(result.stdout+result.stderr)
-        if (result.returncode==0 and '/7.0 GPU' in result.stdout
+        if (result.returncode==0 and f'/{gpus}.0 GPU' in result.stdout
                 and 'browsecomp_pilot_train' in result.stdout
                 and 'browsecomp_pilot_rollout' in result.stdout
                 and 'browsecomp_pilot_replica' in result.stdout): return
         time.sleep(5)
-    raise RuntimeError('Seven-GPU pilot Ray resource pool did not become ready')
+    raise RuntimeError(f'{gpus}-GPU pilot Ray resource pool did not become ready')
 
 
 def stop(process):
@@ -136,7 +136,9 @@ def parse_args():
     parser=argparse.ArgumentParser()
     parser.add_argument('--run-name',required=True)
     parser.add_argument('--train-job',type=int,action='append',required=True,
-        help='one four-GPU allocation, or repeat for two two-GPU allocations')
+        help='one training allocation, or repeat for two two-GPU allocations')
+    parser.add_argument('--train-gpus',type=int,choices=(2,4),default=4,
+        help='two uses one host and DP=1; four uses DP=2 (default)')
     parser.add_argument('--inference-job',type=int,required=True,
         help='three GPUs, or two GPUs when --replica-job is supplied')
     parser.add_argument('--replica-job',type=int,
@@ -162,7 +164,8 @@ def main():
         raise RuntimeError(f'Pilot storage has {free} bytes free; {required_free} required')
     ops=run/'pilot-operations'
     ops.mkdir(parents=True)
-    jobs,required=allocation_plan(args.train_job,args.inference_job,args.aux_job,args.replica_job)
+    jobs,required=allocation_plan(args.train_job,args.inference_job,args.aux_job,args.replica_job,
+        train_gpus=args.train_gpus)
     hosts={role:job_node(job) for role,job in jobs.items()}
     gpus={role:allocated_gpus(job) for role,job in jobs.items()}
     if any(gpus[role]<count for role,count in required.items()):
@@ -206,7 +209,7 @@ def main():
     wait_http('retriever',retriever_url+'/health',retriever=True)
     wait_http('judge',judge_url+'/models')
     address=f'{ips["train"]}:6485'
-    start(ops,'ray-train',step(jobs['train'],'ray-train',28,
+    start(ops,'ray-train',step(jobs['train'],'ray-train',4,
         ['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),'train','',str(required['train'])]))
     wait_log(ops,'ray-train','Ray runtime started.')
     ray_names=['ray-train']
@@ -216,10 +219,10 @@ def main():
         name=f'ray-{role}'
         command=['bash',str(EXPERIMENT/'scripts/pilot_ray_node.sh'),ray_role,address]
         if role=='train_worker': command.append(str(required[role]))
-        start(ops,name,step(jobs[role],name,28,command))
+        start(ops,name,step(jobs[role],name,4,command))
         ray_names.append(name)
     for name in ray_names[1:]: wait_log(ops,name,'Ray runtime started.')
-    wait_ray(ops,jobs['train'],address,ray_names)
+    wait_ray(ops,jobs['train'],address,ray_names,args.train_gpus+3)
     index=RETRIEVER/'indexes/qwen3-embedding-0.6b'
     index_hashes={}
     for path in sorted(index.glob('*')):

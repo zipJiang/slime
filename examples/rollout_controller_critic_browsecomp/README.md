@@ -31,26 +31,30 @@ sources, infrastructure, manifest, and the retained-summary hash inventory are i
 and the training boundary verify provenance across the transition. Recovery
 collection supervisor **401517** completed successfully at 11:01 EDT. All 640
 traces passed exact readback: 7,195 contexts, 6,688 folds, 153 successful episodes,
-maximum critic context 5,007 tokens. Current eight-GPU training supervisor is
-**401818**. Job 401586 failed before initialization while JSON-serializing a
-native enum; 401812 failed on an aged-out completed-job squeue lookup. Both
-startup bugs are fixed, with original failure records under `recovery/`.
-The former four-GPU waiter 401518 was canceled before training to expand this
-stage to eight GPUs at the user's request. New allocations 401530 (gh106) and
-401540 (gh108), two H100s each, expire September 16 around 09:30 EDT. Four-GPU
-NCCL collectives on the new hosts and native TP=2/DP=4 argument/packing preflight
-passed; full eight-GPU model training remains pending collection completion.
-Inspect these live handles before launching anything else. The 100 CPU tests pass,
-including preservation of overflow prompts and draining work after a failure.
+maximum critic context 5,007 tokens. The initial training completed 16 updates and
+full checkpoint readback, but held-out MSE 0.2186 was worse than the train-fitted
+constant's 0.1096. Its strict 1e-5 reload check also stopped finalization on one
+0.00125 prediction difference. Original evidence remains under `training/`.
 
-- Collection uses gh129's two GPUs for a TP=2 base actor, gh101 GPU 0 for dense
-  retrieval, and gh101 GPU 1 for the frozen 27B answer judge.
-- After collection and exact snapshot readback, gh101, gh129, gh106, and gh108
-  form four native TP=2 critic replicas (DP=4), eight GPUs total. Training retains
-  eight questions per optimizer batch and 16 updates for the one-pass experiment.
-- The training supervisor reads colon-separated two-GPU allocation IDs from
-  `CRITIC_TRAIN_JOBS` (current value `360839:384912:401530:401540`) and sets
-  `CRITIC_TRAIN_NODES` for the driver. The default remains the original two hosts.
+Read-only packing and train/eval comparisons agreed. An isolated real update
+reduced same-batch MSE from 0.2179 to 0.0900, and sleep/wake preserved all updated
+predictions exactly. This motivated a lower-rate refinement, not a declaration
+that the critic is ready.
+
+Current supervisor **402798** uses gh106/gh108 (four H100s) and gh203/gh205 (four
+H200s), separate from PPO. It initializes model-only from critic checkpoint 15,
+resets optimizer/RNG/cursor, and makes another 16-update pass at LR **1e-6** with
+held-out validation every four updates. Outputs are under
+`runs/base-v2/training-refine-lr1e6-v1`; sibling operations end in `-operations`.
+At September 13, 12:58 EDT, initialization and baseline validation completed;
+new training is starting. Inspect the live job and output before launching a replacement.
+
+- `CRITIC_TRAIN_JOBS` supplies two or four distinct two-GPU allocations. The head
+  IP and training host count are derived from those allocations.
+- `CRITIC_TRAIN_OUTPUT` and `CRITIC_TRAIN_OPERATIONS` select fresh output paths.
+  `CRITIC_TRAIN_EXTRA_ARGS` is a JSON array of native driver CLI strings.
+- The launcher explicitly sets reload tolerance 0.005 and retains every error.
+  The driver's default remains 1e-5 when invoked directly.
 - Slurm CPU batch jobs own all service launchers. GPU steps use `--mem=0` to avoid
   inheriting the CPU supervisor's smaller memory request. Each service has its
   own process group and file log.
@@ -96,7 +100,7 @@ four planned continuation streams remain distinct within every question.
 ## Training and artifacts
 
 The first pass uses 16 optimizer updates, eight questions per update, Adam at
-5e-6, unclipped probability MSE, BF16, TP=2, DP=2, and the existing native critic
+5e-6, unclipped probability MSE, BF16, TP=2, DP=4, and the existing native critic
 loss/packing implementation. Additional epochs require an explicit experiment
 decision after validation. This does not add extra critic updates to a PPO batch.
 
@@ -145,7 +149,7 @@ The driver exercises this load path and checks actual optimizer/scheduler state.
 The critic wrapper also normalizes model-only native loading to rollout zero:
 Megatron finetune reports iteration zero, which unmodified Slime converts to
 rollout one. Real paired-resume cursors remain unchanged. Training and reload
-now require all four ranks to report fresh cursor zero.
+require every configured rank to report fresh cursor zero.
 
 Pretraining does not by itself prove warmup can be removed. That decision still
 requires the focused audit and a zero-warmup PPO pilot with the intended rollout
@@ -165,9 +169,9 @@ log probabilities, the pretrained critic prior, and the frozen semantic judge.
 `scripts/pilot_audit_batch.py` reconstructs every actor and critic record from the
 saved native tree before either optimizer may consume it.
 
-The pilot uses nine GPUs: four shared/offloaded native actor-and-critic trainer
-GPUs, two SGLang rollout GPUs, one frozen portable critic GPU, and one retriever
-plus one judge GPU. Training can use one four-GPU host or two two-GPU hosts;
+The pilot uses seven or nine GPUs: two or four shared/offloaded native actor-and-critic
+trainer GPUs, two SGLang rollout GPUs, one frozen portable critic GPU, and one
+retriever plus one judge GPU. Four-rank training can use one host or two hosts;
 each TP pair stays on one host. The portable critic may share the inference
 allocation or use a separate allocation. This supports three to five distinct
 hosts, including five two-GPU allocations (nine GPUs used, one unused). Artifacts default to
@@ -196,12 +200,24 @@ sbatch operations/pilot.sbatch \
   --deadline-unix UNIX_TIMESTAMP
 ```
 
-Topology and CPU integration tests pass (107 total CPU tests); the flexible
-layout still needs the live pilot after critic pretraining. Eight dedicated
-BrowseComp GPUs cover pretraining, so the pilot needs one additional usable GPU.
+For seven total GPUs, use a single two-GPU H200 training allocation (TP=2/DP=1):
+
+```bash
+sbatch operations/pilot.sbatch \
+  --run-name browsecomp-zero-warmup-pilot-v1 \
+  --candidate /absolute/path/to/training/warmstart-candidate.json \
+  --train-gpus 2 --train-job TRAIN_H200_JOB \
+  --inference-job ROLLOUT_JOB --replica-job CRITIC_JOB --aux-job AUX_JOB \
+  --deadline-unix UNIX_TIMESTAMP
+```
+
+Both layouts retain six questions and one update per batch. Thirty focused tests
+pass for topology, preflight, and promotion, and the native scheduler preserves
+all sample identities and question weights at DP=1 and DP=2. The two-GPU trainer
+still requires live memory verification; no pilot has run yet.
 
 The supervisor validates allocation size and separation, performs the shared
-CPU preflight, starts and probes both auxiliary services and the seven-GPU Ray
+CPU preflight, starts and probes both auxiliary services and the five- or seven-GPU Ray
 cluster, runs exactly two sequential joint updates, and tears down only the child
 process groups it created. The driver checks fresh actor and critic cursors and
 optimizers, publishes and compares the critic before collection and after each

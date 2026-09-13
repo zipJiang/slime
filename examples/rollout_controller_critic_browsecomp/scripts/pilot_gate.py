@@ -28,12 +28,16 @@ def promote(candidate_path, pilot_path):
     if Path(initialization['actor']['load']).resolve()!=Path(candidate['base_actor']).resolve():
         raise ValueError('Pilot actor did not start from the candidate base model')
     expected_critic=candidate['critic']
+    training_ranks=pilot.get('training_ranks',4)
+    if training_ranks not in (2,4):
+        raise ValueError('Pilot training rank count is unsupported')
     if (Path(initialization['critic']['load']).resolve()!=Path(expected_critic['load']).resolve()
             or initialization['critic']['ckpt_step']!=expected_critic['ckpt_step']):
         raise ValueError('Pilot critic did not start from the candidate checkpoint')
     for role in ('actor','critic'):
         state=initialization[role]
-        if state['cursors']!=[0,0,0,0] or not all(item['fresh'] for item in state['optimizers']):
+        if (state['cursors']!=[0]*training_ranks or len(state['optimizers'])!=training_ranks
+                or not all(item['fresh'] for item in state['optimizers'])):
             raise ValueError(f'Pilot {role} did not start at cursor zero with a fresh optimizer')
     batches=pilot.get('batches',[])
     if (len(batches)!=updates or any(not row.get(key) for row in batches

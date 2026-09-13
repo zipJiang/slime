@@ -86,7 +86,7 @@ def equivalence_contexts(candidate_path,tokenizer):
     return [data['validation'][i]['context'] for i in selected]
 
 
-def initialization_report(group,cursors,expected_ranks=4):
+def initialization_report(group,cursors,expected_ranks):
     reports=ray.get([actor.audit_optimizer_start.remote() for actor in group._actor_handlers])
     if (cursors!=[0]*expected_ranks or len(reports)!=expected_ranks
             or not all(report['fresh'] for report in reports)):
@@ -119,6 +119,10 @@ def replay_audit(directory):
 
 def train(args):
     configure_logger();run=Path(args.save).parent;run.mkdir(parents=True,exist_ok=True)
+    training_ranks=args.actor_num_nodes*args.actor_num_gpus_per_node
+    if (training_ranks not in (2,4) or args.tensor_model_parallel_size!=2
+            or args.pipeline_model_parallel_size!=1 or args.context_parallel_size!=1):
+        raise ValueError('Pilot requires two or four ranks with TP=2, PP=1, CP=1')
     if (run/'recipe.json').exists(): raise ValueError('Use a fresh output for every pilot attempt')
     if (not args.use_critic or not args.offload_train or args.release_train
             or args.normalize_advantages or args.calculate_per_token_loss):
@@ -168,14 +172,14 @@ def train(args):
         pgs['critic'],role='critic',actor_cls=CheckpointCriticActor)
     critic_cursors=critic.create(rollout_manager=manager)
     initialization=dict(actor=dict(load=str(Path(actor_args.load).resolve()),
-        **initialization_report(actor,actor_cursors)),
+        **initialization_report(actor,actor_cursors,training_ranks)),
         critic=dict(load=str(Path(critic_args.load).resolve()),ckpt_step=critic_args.ckpt_step,
-        **initialization_report(critic,critic_cursors)))
+        **initialization_report(critic,critic_cursors,training_ranks)))
     actor.update_weights();behavior_version=engine_version(manager)
     tokenizer=AutoTokenizer.from_pretrained(args.hf_checkpoint,local_files_only=True)
     sentinel=tokenizer.eos_token_id
     if not isinstance(sentinel,int): raise ValueError('Expected one EOS sentinel token')
-    parallel=dict(dp_size=2,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
+    parallel=dict(dp_size=training_ranks//2,cp_size=1,vpp_size=1,microbatch_group_size_per_vp_stage=1)
     native=CriticScorer(critic._actor_handlers,critic_args,parallel,tokenizer,sentinel)
     pg,bundle=pgs['critic_inference']
     replica=ray.remote(num_gpus=1,num_cpus=1)(FrozenCriticReplica).options(
@@ -189,9 +193,9 @@ def train(args):
         nonlocal previous_snapshot
         version=f'critic-{completed:04d}';snapshot=run/'critic-snapshots'/version
         exports=ray.get([a.export_snapshot.remote(str(snapshot),version) for a in critic._actor_handlers])
-        if (len(exports)!=4 or sorted(int(report['rank']) for report in exports)!=list(range(4))
+        if (len(exports)!=training_ranks or sorted(int(report['rank']) for report in exports)!=list(range(training_ranks))
                 or any(report['version']!=version for report in exports)):
-            raise RuntimeError('Critic snapshot did not involve all four native ranks')
+            raise RuntimeError('Critic snapshot did not involve every native rank')
         published=ray.get(replica.publish.remote(str(snapshot),version))
         native.begin(version)
         try: expected=native.score(contexts,version)
@@ -277,6 +281,7 @@ def train(args):
     if successes==0: rejection.append('No successful terminal was observed')
     if successes==terminals: rejection.append('No failed terminal was observed')
     pilot=dict(schema='browsecomp-zero-warmup-pilot-v1',
+        training_ranks=training_ranks,
         candidate_sha256=digest(args.pilot_candidate),
         context_function_sha256=function_sha256(args.pilot_context_source,'context'),
         num_critic_only_steps=0,start_rollout_id=0,completed_joint_updates=2,

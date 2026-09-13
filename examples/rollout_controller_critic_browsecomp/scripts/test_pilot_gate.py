@@ -61,6 +61,18 @@ def test_two_update_pilot_promotes_and_remains_verifiable(tmp_path):
     assert require_long_run(path)['critic']['ckpt_step']==15
 
 
+def test_two_rank_pilot_requires_complete_optimizer_evidence(tmp_path):
+    candidate,pilot=fixture(tmp_path);value=json.loads(pilot.read_text())
+    value['training_ranks']=2
+    for state in value['initialization'].values():
+        state.update(cursors=[0]*2,optimizers=[dict(fresh=True)]*2)
+    write(pilot,value)
+    assert promote(candidate,pilot)['ready_for_long_run']
+    value['initialization']['critic']['optimizers'].pop();write(pilot,value)
+    with pytest.raises(ValueError,match='fresh optimizer'):
+        promote(candidate,pilot)
+
+
 @pytest.mark.parametrize('mutation,match',[
     (lambda p:p.update(completed_joint_updates=1),'at least two'),
     (lambda p:p['initialization']['critic'].update(cursors=[1]*4),'cursor zero'),
