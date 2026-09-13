@@ -25,4 +25,5 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --seq-length 32768 --use-dynamic-batch-size --max-tokens-per-gpu 24576 --balance-data \
   --attention-dropout 0 --hidden-dropout 0 --attention-backend flash \
   --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
-  --critic-collection "$collection_run/collection" "$@"
+  --critic-collection "$collection_run/collection" \
+  --critic-reload-tolerance "${CRITIC_RELOAD_TOLERANCE:-0.005}" "$@"

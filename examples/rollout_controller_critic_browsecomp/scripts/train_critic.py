@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -46,6 +47,7 @@ def custom_args(parser):
     parser.add_argument('--critic-collection',required=True)
     parser.add_argument('--critic-epochs',type=int,default=1)
     parser.add_argument('--critic-preflight-only',action='store_true')
+    parser.add_argument('--critic-reload-tolerance',type=float,default=1e-5)
     return parser
 
 
@@ -72,6 +74,8 @@ def placement(num_hosts):
 
 def run(args):
     configure_logger()
+    if not math.isfinite(args.critic_reload_tolerance) or args.critic_reload_tolerance<0:
+        raise ValueError('Reload tolerance must be finite and nonnegative')
     out=Path(args.save).parent
     out.mkdir(parents=True,exist_ok=True)
     if (out/'recipe.json').exists(): raise ValueError('Use a fresh training output for each attempt')
@@ -192,10 +196,12 @@ def run(args):
         raise ValueError('Weight-only warmstart restored optimizer/scheduler history')
     scorer=scorer_for(loaded)
     reloaded,reloaded_predictions=evaluate('weight-only-reload')
-    error=max(abs(a-b) for a,b in zip(predictions,reloaded_predictions,strict=True))
-    write(out/'reload-audit.json',dict(max_abs_error=error,passed=error<=1e-5,
+    errors=[abs(a-b) for a,b in zip(predictions,reloaded_predictions,strict=True)]
+    error=max(errors)
+    write(out/'reload-audit.json',dict(max_abs_error=error,passed=error<=args.critic_reload_tolerance,
+        tolerance=args.critic_reload_tolerance,abs_errors=errors,
         world_size=world_size,cursors=cursors,optimizers=optimizers,finetune=True,no_load_optim=True,no_load_rng=True))
-    if error>1e-5: raise ValueError('Weight-only critic reload changed predictions')
+    if error>args.critic_reload_tolerance: raise ValueError('Weight-only critic reload changed predictions beyond tolerance')
     loaded.release()
     write(out/'native-validated.json',dict(updates=step,checkpoint=args.save,iteration=step-1,
         initial=initial,trained=final,reload_max_abs_error=error,

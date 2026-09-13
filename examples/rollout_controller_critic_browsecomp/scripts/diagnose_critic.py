@@ -2,7 +2,9 @@
 
 Runs only on a separate, model-only checkpoint load. The training path receives
 zero loss and both optimizer and scheduler steps are replaced with no-ops.
-No checkpoint or model export is written.
+With --diagnostic-update-only, instead apply one real update to the isolated
+copy and compare predictions before/after the update and across sleep/wake.
+No checkpoint or model export is written in either mode.
 """
 import hashlib
 import json
@@ -45,6 +47,50 @@ def diagnostic_loss(args, batch, logits, reducer):
 
 
 class DiagnosticActor(CheckpointCriticActor):
+    def compare_update(self, refs):
+        from megatron.core import mpu
+        if not (self.args.finetune and self.args.no_load_optim and self.args.no_load_rng):
+            raise ValueError('Update diagnostic requires an isolated model-only load')
+        if not self.audit_optimizer_start()['fresh']:
+            raise ValueError('Update diagnostic must start with fresh optimizer')
+        self.wake_up()
+        tp_rank=mpu.get_tensor_model_parallel_rank()
+        dp_rank=mpu.get_data_parallel_rank()
+        data = self._get_rollout_data(refs)
+        def predict():
+            output = forward_only(probability_values, self.args, self.model,
+                get_data_iterator(data), data['num_microbatches'])
+            return [float(v.detach().float().cpu().item()) for v in output['values']]
+        def head_digest():
+            result = {}
+            for chunk in self.model:
+                for name, parameter in chunk.named_parameters():
+                    if name.endswith(('output_layer.weight', 'output_layer.bias')):
+                        value = parameter.detach().float().cpu().contiguous()
+                        result[name] = dict(sha256=hashlib.sha256(value.numpy().tobytes()).hexdigest(),
+                            mean=float(value.mean()), norm=float(value.norm()))
+            return result
+        before = predict()
+        head_before = head_digest()
+        partial_path=Path(self.args.diagnostic_output)/f'update-dp{dp_rank}-tp{tp_rank}.json'
+        evidence=dict(tp_rank=tp_rank,dp_rank=dp_rank,partition=data['partition'],
+            before=before,head_before=head_before)
+        write(partial_path,evidence)
+        self.train_critic(0, data)
+        after = predict()
+        head_after = head_digest()
+        optimizer_after = self.audit_optimizer_start()
+        evidence.update(after=after,head_after=head_after,optimizer_after=optimizer_after)
+        write(partial_path,evidence)
+        self.sleep()
+        self.wake_up()
+        resumed = predict()
+        head_resumed = head_digest()
+        evidence.update(resumed=resumed,head_resumed=head_resumed)
+        write(partial_path,evidence)
+        self.sleep()
+        return evidence
+
     def compare_training(self, refs):
         from megatron.core import mpu
         if not (self.args.finetune and self.args.no_load_optim and self.args.no_load_rng):
@@ -89,6 +135,7 @@ def run(args):
     experiment = Path(__file__).resolve().parents[1]
     out = Path(args.save).parent
     out.mkdir(parents=True, exist_ok=True)
+    args.diagnostic_output=str(out)
     args.save = None
     args.save_hf = None
     args.use_kl_loss = False
@@ -117,6 +164,29 @@ def run(args):
         raise ValueError('Model-only load retained training cursor')
     write(out/'initialized.json', dict(physical=physical, cursors=cursors,
         contexts=len(selected), questions=questions, load=args.load, iteration=args.ckpt_step))
+    if args.diagnostic_update_only:
+        rows = [checkpoint_fields(dict(r, group_index=questions.index(r['group_index'])), tokenizer,
+            sentinel_token_id=tokenizer.eos_token_id, max_sequence_length=args.seq_length,
+            warmup=True) for r in selected]
+        packets = put_packets(partition_data(args, parallel,
+            training_data(rows, lane='critic', expected_groups=range(8))))
+        reports = ray.get([a.compare_update.remote(packets) for a in critic._actor_handlers])
+        predictions = {}
+        for stage in ['before', 'after', 'resumed']:
+            combined = {}
+            for report in reports:
+                for index, value in zip(report['partition'], report[stage], strict=True):
+                    if index in combined and abs(combined[index]-value)>1e-5:
+                        raise ValueError('TP prediction mismatch')
+                    combined[index] = value
+            predictions[stage] = [combined[i] for i in range(len(selected))]
+        result = dict(metrics={stage:metrics(selected, values, baseline)
+            for stage,values in predictions.items()}, reports=reports,
+            max_sleep_wake_error=max(abs(a-b) for a,b in zip(
+                predictions['after'], predictions['resumed'], strict=True)))
+        write(out/'complete.json', result)
+        critic.release()
+        return
     scorer = CriticScorer(critic._actor_handlers, args, parallel, tokenizer, tokenizer.eos_token_id)
     version = 'saved-critic-diagnostic'
     scorer.begin(version)
@@ -162,7 +232,11 @@ def run(args):
 
 
 if __name__ == '__main__':
-    args = parse_args(custom_args)
+    def diagnostic_args(parser):
+        parser = custom_args(parser)
+        parser.add_argument('--diagnostic-update-only', action='store_true')
+        return parser
+    args = parse_args(diagnostic_args)
     ray.init(address=os.environ['RAY_ADDRESS'], runtime_env={'env_vars':{
         'GLOO_SOCKET_IFNAME':'ens0','NCCL_SOCKET_IFNAME':'ens0','NCCL_IB_DISABLE':'1',
         'PYTHONPATH':os.environ['PYTHONPATH']}})
