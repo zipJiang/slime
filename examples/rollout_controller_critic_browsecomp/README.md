@@ -63,8 +63,19 @@ native/portable prediction error is at most 0.00183064. Collection then rejected
 the seven-GPU infrastructure because its validator still assumed four trainer
 GPUs. That validator now checks the declared supported trainer layout; 15 focused
 tests and the actual collector check inside the native container pass.
-Current supervisor **403238** runs `browsecomp-zero-warmup-refine-lr1e6-v3` on the
-same seven GPUs. Training-time memory fit and zero-warmup updates remain unverified.
+Pilot **403238** subsequently reached sample preparation but failed because the
+shared SFT fixture wrapper labeled live actor traces with the default `policy`
+version. The pilot now binds the actual Slime policy directly, saves complete
+search evidence before preparation, and drains other questions on one failure.
+The two-pass search/save/reload/preparation test passes for actor-0000 and
+actor-0001, including inside the actual training container; 16 focused tests pass.
+
+Current supervisor **403526** runs `browsecomp-zero-warmup-refine-lr1e6-v4` on the
+same seven GPUs. At September 13, 14:47 EDT, fresh generation is verified active.
+Initial critic publication passes with maximum error **0.00183064** and exact
+pretrained weight-file hashes. `startup-audit.json` records recipe, source,
+question-disjointness, artifact, and live-process ownership checks. Both actual
+joint updates, training-time peak memory, and final promotion remain unverified.
 
 - `CRITIC_TRAIN_JOBS` supplies two or four distinct two-GPU allocations. The head
   IP and training host count are derived from those allocations.
@@ -235,8 +246,8 @@ sbatch operations/pilot.sbatch \
 
 Both layouts retain six questions and one update per batch. Thirty focused tests
 pass for topology, preflight, and promotion, and the native scheduler preserves
-all sample identities and question weights at DP=1 and DP=2. The two-GPU trainer
-still requires live memory verification; the first pilot is starting.
+all sample identities and question weights at DP=1 and DP=2. Two-GPU model initialization is verified; training-time peak memory remains
+to be tested by the live pilot.
 
 `PILOT_CRITIC_LR` overrides the pilot critic learning rate (default 5e-6).
 The pilot following `training-refine-lr1e6-v1` uses 1e-6, matching refinement.
@@ -263,15 +274,3 @@ Collection source files are pinned once the manifest is written. Changing those
 files while collection runs makes a subsequent resume fail. Audit them read-only
 first; fixes require an intentional source/data transition.
 
-
-The initial refined-critic pilot verified two-rank initialization and publication,
-but its first completed search exposed a live-policy provenance mismatch: the
-shared SFT fixture wrapper used the default `policy` version. The pilot collector
-now binds the live Slime policy directly and preserves its exact behavior channel
-through task and derived compactor runners. It saves complete search evidence
-before sample preparation and drains other questions on an individual failure.
-The real two-pass search/save/reload/preparation test passes for actor-0000 and
-actor-0001, including inside the training container. Slime source: `5ef9ecde`.
-Replacement supervisor **403526**, run `browsecomp-zero-warmup-refine-lr1e6-v4`,
-retains the same pretrained candidate and two-update zero-warmup recipe. Both
-actual joint updates and final promotion remain to be verified.
