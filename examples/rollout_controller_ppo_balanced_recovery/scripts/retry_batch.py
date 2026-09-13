@@ -64,7 +64,7 @@ def restore_batch(args, rollout_id, case_keys, frozen, directory):
         if path.is_file() and not path.name.endswith('audit.json'):
             with path.open('rb') as stream:
                 hashes[path.name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-    staging = directory.with_name(directory.name+'.retry-copy')
+    staging = directory.with_name('.retry-copy-'+directory.name)
     shutil.copytree(source, staging, ignore=shutil.ignore_patterns('*audit.json',
         'training-complete.json', 'training-lineage.json', 'critic-supervision.json'))
     for name, expected in hashes.items():
@@ -72,6 +72,7 @@ def restore_batch(args, rollout_id, case_keys, frozen, directory):
             if hashlib.file_digest(stream, 'sha256').hexdigest() != expected:
                 raise ValueError('Retry batch changed while copying: '+name)
     provenance = dict(source=str(source), restored_checkpoint=read(run/'resume.json'),
+        retry_implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         source_files=hashes, source_contract_sha256=hashlib.sha256((source/'contract.json').read_bytes()).hexdigest(),
         collection_reused=True, optimizer_updates_reused=False)
     (staging/'retry-batch-source.json').write_text(json.dumps(provenance, indent=2)+'\n')

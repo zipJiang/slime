@@ -58,6 +58,21 @@ def test_retry_preserves_records_and_regenerates_training_audits(setup):
     assert restore_batch(args, 43, ['next'], frozen, output) is None
 
 
+def test_audit_watcher_cannot_discover_staging_copy(setup, monkeypatch):
+    import retry_batch
+    args, frozen, source, output = setup
+    original = retry_batch.shutil.copytree
+
+    def copying(*a, **kw):
+        result = original(*a, **kw)
+        assert not list(output.parent.glob('train-*'))
+        return result
+
+    monkeypatch.setattr(retry_batch.shutil, 'copytree', copying)
+    restore_batch(args, 42, ['case'], frozen, output)
+    assert list(output.parent.glob('train-*')) == [output]
+
+
 @pytest.mark.parametrize('mutation,match', [
     ('checkpoint', 'same paired checkpoint'), ('cursor', 'cursor'),
     ('stale', 'first batch'), ('audit', 'full target replay'),
