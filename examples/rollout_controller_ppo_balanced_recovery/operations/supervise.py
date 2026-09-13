@@ -15,11 +15,20 @@ parser.add_argument('--deadline', type=float)
 parser.add_argument('--train-job', type=int, action='append', required=True)
 parser.add_argument('--rollout-job', type=int, action='append', required=True)
 parser.add_argument('--critic-job', type=int, required=True)
+parser.add_argument('--critic-gpu', type=int,
+    help='physical GPU index when the critic uses a separate allocation')
 parser.add_argument('--resume-run', type=Path, required=True)
 parser.add_argument('--stop-after-round', type=int)
+parser.add_argument('--resume-after-job', type=int,
+    help='automatically release GO after this supervisor completes with an audited paused checkpoint')
+parser.add_argument('--release-idle-job', type=int,
+    help='return an excluded allocation after the replacement completes its first update')
 args = parser.parse_args()
+all_jobs = list(dict.fromkeys([*args.train_job, *args.rollout_job, args.critic_job]))
+if args.release_idle_job is not None and (args.resume_after_job is None or args.release_idle_job in all_jobs):
+    raise ValueError('Only a migrated-away allocation may be returned after verified resumption')
 plan = build_plan(args.train_job, args.rollout_job, args.critic_job,
-    {j:read_allocation(j) for j in [*args.train_job, *args.rollout_job]})
+    {j:read_allocation(j) for j in all_jobs}, critic_gpu=args.critic_gpu)
 args.deadline = args.deadline or plan['earliest_expiry']-90*60
 if not time.time() < args.deadline <= plan['earliest_expiry']-90*60:
     raise ValueError('Leave at least 90 minutes to drain and save before allocation expiry')
@@ -33,12 +42,23 @@ def write(name, obj):
     tmp.write_text(json.dumps(obj,indent=2)+'\n')
     tmp.replace(path)
 
-ray_labels = [f'ray-{j}' for j in [*args.train_job, *args.rollout_job]]
+ray_labels = [f'ray-{j}' for j in all_jobs]
 write('ready.json', dict(job=os.environ['SLURM_JOB_ID'], host=os.uname().nodename,
     pid=os.getpid(), cgroup=Path('/proc/self/cgroup').read_text(), started_unix=time.time(),
     plan=plan, ray_labels=ray_labels, deadline=args.deadline, resume_run=str(args.resume_run)))
 # Explicit release file allows the caller to verify independence before cutover.
 while not (state_dir/'GO').exists():
+    if args.resume_after_job is not None:
+        from migration import migration_ready
+        try:
+            boundary=migration_ready(args.resume_after_job,args.resume_run)
+        except Exception as exc:
+            write('failed.json',dict(error=repr(exc),stage='migration_boundary',unix_time=time.time()))
+            raise
+        if boundary is not None:
+            write('migration-boundary.json',boundary)
+            (state_dir/'GO').touch()
+            break
     time.sleep(5)
 
 children={}
@@ -76,7 +96,7 @@ def wait_log(label, needle, timeout=180):
 
 try:
     ips = {}
-    for job in [*args.train_job, *args.rollout_job]:
+    for job in all_jobs:
         addresses = subprocess.check_output(step(job,'address',['hostname','-I'],cpus=1),text=True).split()
         ips[job] = next(ip for ip in addresses if ip.startswith(('172.','10.')))
     head = args.train_job[0]
@@ -107,6 +127,11 @@ try:
     for job in args.rollout_job:
         label = f'ray-{job}'
         start(label,step(job,label,['bash',str(P/'scripts/ray_node.sh'),'rollout',address,'2']))
+    if plan['critic_only_job'] is not None:
+        job = plan['critic_only_job'];label = f'ray-{job}'
+        start(label,step(job,label,['env',f'CUDA_VISIBLE_DEVICES={plan["critic_gpu"]}',
+            'PPO_RAY_DASHBOARD_AGENT_PORT=52366',
+            'bash',str(P/'scripts/ray_node.sh'),'rollout',address,'1']))
     rays=list(children)
     for label in rays:
         wait_log(label,'Ray runtime started.')
@@ -133,6 +158,18 @@ try:
     start('deadline',[python,str(P/'scripts/deadline_watch.py'),str(run),'--deadline',str(args.deadline)])
     while driver.poll() is None:
         assert_alive(rays)
+        if args.release_idle_job is not None and not (state_dir/'released-allocation.json').exists():
+            status_path=run/'status.json'
+            if status_path.exists():
+                boundary=json.loads((state_dir/'migration-boundary.json').read_text())
+                status=json.loads(status_path.read_text())
+                restore=run/'initial-native-restore-audit.json'
+                if (status['completed_actor_updates']>boundary['actor_updates']
+                        and restore.exists() and json.loads(restore.read_text())['passed']):
+                    from migration import release_idle_allocation
+                    if release_idle_allocation(args.release_idle_job):
+                        write('released-allocation.json',dict(job=args.release_idle_job,
+                            unix_time=time.time(),verified_status=status))
         for label in ['target-audits','checkpoints','evaluation']:
             if children[label].poll() not in (None,0):
                 (run/'STOP').touch()

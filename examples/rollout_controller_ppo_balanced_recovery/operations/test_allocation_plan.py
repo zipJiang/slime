@@ -25,3 +25,19 @@ class AllocationTests(unittest.TestCase):
         a[2]['host'] = a[1]['host']
         with self.assertRaises(ValueError):
             build_plan([1,2],[3,4],4,a)
+
+    def test_separate_critic_uses_one_explicit_gpu(self):
+        a=self.allocations({1:2,2:2,3:2,4:2,5:2})
+        p=build_plan([1,2],[3,4],5,a,critic_gpu=1)
+        self.assertEqual((p['rollout_gpus'],p['total_gpus']),(4,9))
+        self.assertEqual(p['required_gpus'][5],1)
+        self.assertEqual((p['critic_only_job'],p['critic_gpu']),(5,1))
+        self.assertEqual(p['earliest_expiry'],1001)
+
+    def test_separate_critic_requires_valid_physical_gpu(self):
+        a=self.allocations({1:2,2:2,3:2,4:2,5:2})
+        for gpu in [None,-1,2,True]:
+            with self.subTest(gpu=gpu),self.assertRaises(ValueError):
+                build_plan([1,2],[3,4],5,a,critic_gpu=gpu)
+        with self.assertRaises(ValueError):
+            build_plan([1,2],[3,4],4,a,critic_gpu=1)

@@ -21,6 +21,9 @@ else
   ray_args=(--address="${address:?head address}" --num-gpus="$rollout_gpus" --num-cpus=32
     --resources="{\"deontic_direct_branch_rollout\":$rollout_gpus}")
 fi
+if [[ -n "${PPO_RAY_DASHBOARD_AGENT_PORT:-}" ]]; then
+  ray_args+=(--dashboard-agent-listen-port="$PPO_RAY_DASHBOARD_AGENT_PORT")
+fi
 exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/with_torch_cudnn.py" \
   ray start "${ray_args[@]}" \
   --object-store-memory=4294967296 --disable-usage-stats --block
