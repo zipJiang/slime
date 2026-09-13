@@ -38,6 +38,10 @@ def write(path,value):
     temp.write_text(json.dumps(value,indent=2,allow_nan=False)+'\n');temp.replace(path)
 
 
+def status(out,stage,**details):
+    write(out/'status.json',dict(stage=stage,unix_time=time.time(),**details))
+
+
 def custom_args(parser):
     parser.add_argument('--critic-collection',required=True)
     parser.add_argument('--critic-epochs',type=int,default=1)
@@ -105,6 +109,8 @@ def run(args):
         scripts={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob('*.py')}))
     write(out/'sampling-audit.json',sampling)
     write(out/'dataset-inventory.json',dataset_inventory(data))
+    status(out,'native-initialization',train_questions=len({r['group_index'] for r in data['train']}),
+           validation_questions=len({r['group_index'] for r in data['validation']}))
     pg,physical=placement()
     write(out/'placement.json',physical)
     critic=allocate_train_group(args,2,2,pg,role='critic',actor_cls=CheckpointCriticActor)
@@ -133,6 +139,7 @@ def run(args):
                 report['by_checkpoint'][name]=metrics([r for r,p in selected],[p for r,p in selected],baseline)
         write(out/'validation'/f'{version}.json',dict(**report,predictions=predictions))
         return report,predictions
+    status(out,'initial-evaluation')
     initial,_=evaluate('initial')
     groups={q:[r for r in data['train'] if r['group_index']==q] for q in sorted({r['group_index'] for r in data['train']})}
     order=sorted(groups,key=lambda q:hashlib.sha256(('critic-epoch0/'+q).encode()).hexdigest())
@@ -150,25 +157,30 @@ def run(args):
         started=time.time()
         ray.get(critic.async_train(step,put_packets(partition_data(args,parallel,packet))))
         step+=1
-        write(out/'status.json',dict(stage='training',updates=step,total_updates=len(order)//args.global_batch_size,
-            last_update_seconds=time.time()-started,unix_time=time.time()))
+        status(out,'training',updates=step,total_updates=len(order)//args.global_batch_size,
+               last_update_seconds=time.time()-started)
+    status(out,'trained-evaluation',updates=step)
     final,predictions=evaluate('trained')
+    status(out,'native-save',updates=step,iteration=step-1)
     critic.save_model(step-1,force_sync=True)
     # Export before releasing trainer ranks; all TP ranks join the gather.
     snapshot=out/'inference'
     version='browsecomp-base-critic-v1'
+    status(out,'portable-export',updates=step,iteration=step-1)
     ray.get([a.export_snapshot.remote(str(snapshot),version) for a in critic._actor_handlers])
     critic.release()
     # Read every model and optimizer tensor from storage independently of the
     # native loader. The model-only warmstart below intentionally skips these
     # optimizer tensors, so it cannot establish that they were saved intact.
     checkpoint=Path(args.save)/f'iter_{step-1:07d}'
+    status(out,'checkpoint-readback',updates=step,iteration=step-1)
     audit_checkpoint(checkpoint,step,'critic')
     # A future fresh PPO run loads only critic model weights and resets its
     # optimizer/RNG/cursor independently of the base actor.
     warm=copy.deepcopy(args)
     warm.load=args.save;warm.ckpt_step=step-1
     warm.finetune=True;warm.no_load_optim=True;warm.no_load_rng=True
+    status(out,'weight-only-reload',updates=step,iteration=step-1)
     loaded=allocate_train_group(warm,2,2,pg,role='critic',actor_cls=CheckpointCriticActor)
     cursors=loaded.create()
     if cursors != [0]*4: raise ValueError('Weight-only warmstart retained the pretraining cursor')
@@ -187,6 +199,7 @@ def run(args):
         full_checkpoint_readback=str(Path(args.save)/f'iter_{step-1:07d}-readback.json'),
         unix_time=time.time()))
     # Verify the portable inference artifact at actual held-out prefixes.
+    status(out,'portable-equivalence',updates=step,iteration=step-1)
     replica=ray.remote(num_gpus=1)(FrozenCriticReplica).options(
         scheduling_strategy=PlacementGroupSchedulingStrategy(placement_group=pg[0],
             placement_group_bundle_index=pg[1][0])).remote(args.hf_checkpoint,args.seq_length)
@@ -214,10 +227,14 @@ def run(args):
         portable_inference_passed=comparison['passed'],
         readiness='Requires focused audit and zero-warmup PPO pilot before assuming warmup can be removed',
         unix_time=time.time()))
+    status(out,'candidate-finalization',updates=step,iteration=step-1,
+           portable_inference_passed=comparison['passed'])
     write(out/'warmstart-candidate.json',build_candidate(out,
         base_model=args.hf_checkpoint,
         context_source_file_sha256=provenance['sources']['scripts/collect.py'],
         context_function_sha256=function_sha256(EXPERIMENT/'scripts/collect.py','context')))
+    status(out,'complete',updates=step,iteration=step-1,
+           portable_inference_passed=comparison['passed'])
 
 
 def main():
