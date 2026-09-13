@@ -67,7 +67,18 @@ def promote(candidate_path, pilot_path):
             raise ValueError(f'Pilot {role} checkpoint lacks complete readback')
     if pilot.get('scientific_rejection') is not False:
         raise ValueError('Scientifically rejected pilot cannot authorize a long run')
+    profile = pilot.get('environment')
+    extra = {}
+    if profile is not None:
+        # Promotion is specific to the actual tool/horizon profile exercised.
+        if profile.get('profile') not in ('legacy','trace96k'):
+            raise ValueError('Unknown pilot environment profile')
+        context_hash=pilot.get('collection_context_function_sha256')
+        if not isinstance(context_hash,str) or len(context_hash)!=64:
+            raise ValueError('Missing collection context implementation provenance')
+        extra=dict(environment=profile,collection_context_function_sha256=context_hash)
     return dict(schema='browsecomp-critic-long-run-warmstart-v1',ready_for_long_run=True,
+        **extra,
         candidate=str(candidate_path),candidate_sha256=digest(candidate_path),
         pilot=str(pilot_path),pilot_sha256=digest(pilot_path),joint_updates=updates,
         actor_base=candidate['base_actor'],critic=candidate['critic'],

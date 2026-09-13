@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 from batches import training_data
+from pilot_runtime import HARNESS
 
 EXPERIMENT=Path(__file__).resolve().parents[1]
 ROOT=EXPERIMENT.parents[2]
@@ -74,8 +75,8 @@ def generate_rollout(args,rollout_id,data_source,evaluation=False):
         '--prior-strength',str(args.pilot_prior_strength)]
     with (run/f'collector-{rollout_id:04d}.log').open('x') as log:
         subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,
-            cwd=EXPERIMENT/'snapshots/harness',
-            env=dict(os.environ,PYTHONPATH=str(EXPERIMENT/'snapshots/harness')))
+            cwd=HARNESS,
+            env=dict(os.environ,PYTHONPATH=str(HARNESS)))
     summary=json.loads((directory/'summary.json').read_text())
     if (summary['policy_version']!=freeze['policy_version']
             or summary['server_weight_version']!=freeze['server_weight_version']

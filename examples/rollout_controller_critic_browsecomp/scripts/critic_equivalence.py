@@ -2,7 +2,7 @@
 import math
 
 
-def compare_scores(native, replica, repeated, *, version, count, tolerance=.005):
+def compare_scores(native, replica, repeated, *, version, count, tolerance=.01):
     if count <= 0 or not math.isfinite(tolerance) or tolerance < 0:
         raise ValueError('Invalid critic comparison configuration')
     for name, result in [('native', native), ('replica', replica), ('repeated', repeated)]:

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from pilot_data import select_questions
 from ppo_initialization import zero_warmup_role_arguments
 from warmstart_candidate import digest, require_pilot_candidate
+from pilot_runtime import environment_contract
 
 
 SCHEMA = 'browsecomp-zero-warmup-preflight-v1'
@@ -74,7 +75,7 @@ def build(*, candidate_path, context_source, schedule_audit, cases,
     args = SimpleNamespace(num_critic_only_steps=critic_only_steps,
         start_rollout_id=None, load=str(Path(base_actor).resolve()), ckpt_step=None)
     _, _, lineage = zero_warmup_role_arguments(args, candidate_path, context_source)
-    return dict(schema=SCHEMA, passed=True,
+    return dict(schema=SCHEMA, passed=True, environment=environment_contract(),
         candidate=str(candidate_path), candidate_sha256=digest(candidate_path),
         candidate_base_actor=str(Path(candidate['base_actor']).resolve()),
         lineage=lineage, context_source=str(context_source),

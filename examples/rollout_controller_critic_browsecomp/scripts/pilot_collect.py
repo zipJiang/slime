@@ -14,7 +14,8 @@ import time
 
 EXPERIMENT=Path(__file__).resolve().parents[1]
 ROOT=EXPERIMENT.parents[2]
-HARNESS=EXPERIMENT/'snapshots/harness'
+from pilot_runtime import (HARNESS, TRACE, TASK_LIMIT, ACTOR_REPLY_LIMIT,
+    FOLD_REPLY_LIMIT, PROMPT_LIMIT, TOP_K, CONTEXT_LIMIT, environment_contract, verify_harness)
 inherited=set(os.environ.get('PYTHONPATH','').split(os.pathsep))
 sys.path[:]=[str(HARNESS),str(EXPERIMENT/'scripts')]+[
     p for p in sys.path if p not in inherited and p not in (str(ROOT/'slime'),str(ROOT/'rollout-controller'))]
@@ -37,8 +38,8 @@ from step_controller.scheduler.core.policies import Budget
 from step_controller.scheduler.core.scheduler import Scheduler
 from step_controller.scheduler.core.tree import SchedulerState, SchedulerView
 
-from collect import context as serialize_context
-from context_bound import ContextBoundedCompactor
+from pilot_runtime import context as serialize_context
+from pilot_context_bound import ContextBoundedCompactor
 from semantic_judge import SemanticJudge, contract as judge_contract
 from semantic_reward import SemanticRewardExpander
 from targets import split_targets
@@ -157,7 +158,9 @@ def request_seed(namespace,group,question,draw):
 
 def make_live_runner(case,codec,policy,*,archive):
     runner,_,workspace,prompt,compactor,tools=make_runner(case,codec,policy,
-        archive=archive,max_steps=48,compactor_temperature=1.,compactor_top_p=1.)
+        archive=archive,max_steps=TASK_LIMIT,top_k=TOP_K,
+        compactor_temperature=1.,compactor_top_p=1.,
+        **(dict(toolset="trace",context_limit=CONTEXT_LIMIT) if TRACE else {}))
     # The shared fixture builder installs an SFT replay policy whose version is
     # "policy". Live PPO must retain the generating policy and its exact channel,
     # including in the nested compactor runner.
@@ -169,6 +172,7 @@ def make_live_runner(case,codec,policy,*,archive):
 
 
 async def main(args):
+    verify_harness()
     import httpx
     from transformers import AutoTokenizer
     split=json.loads((EXPERIMENT/'data/split.json').read_text())
@@ -191,21 +195,24 @@ async def main(args):
         pass_tokens=args.pass_tokens,max_pass_attempts=args.max_pass_attempts,
         concurrency=args.concurrency,prior_strength=args.prior_strength,
         estimator='direct_branch_td',temperature=1.,top_p=1.,top_k=-1,
-        max_steps=48,prompt_limit=14336,actor_reply_limit=6144,fold_reply_limit=4096,
-        call_budget=10,top_k_documents=5,snippet_chars=700,read_chars=6000,
+        max_steps=TASK_LIMIT,prompt_limit=PROMPT_LIMIT,actor_reply_limit=ACTOR_REPLY_LIMIT,
+        fold_reply_limit=FOLD_REPLY_LIMIT,environment=environment_contract(),
+        call_budget=10,top_k_documents=TOP_K,snippet_chars=700,read_chars=6000,
         checkpoint_context_function_sha256=function_sha256(
-            EXPERIMENT/'scripts/collect.py','context'),
+            EXPERIMENT/'scripts/pilot_runtime.py','context'),
         judge=judge_contract(),collector_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         harness_manifest_sha256=hashlib.sha256((HARNESS/'source-manifest.json').read_bytes()).hexdigest(),
         infrastructure_manifest=str(args.infrastructure_manifest.resolve()),
         infrastructure_manifest_sha256=hashlib.sha256(args.infrastructure_manifest.read_bytes()).hexdigest(),
-        seed_namespace=args.seed_namespace)
+        seed_namespace=args.seed_namespace,
+        profile_sources={name:hashlib.sha256((EXPERIMENT/'scripts'/name).read_bytes()).hexdigest()
+            for name in ['pilot_runtime.py','pilot_context_bound.py']})
     write_json(args.output/'contract.json',contract)
     if args.prepare_only:
         print(json.dumps(contract,indent=2));return
     tokenizer=AutoTokenizer.from_pretrained(args.checkpoint,local_files_only=True)
     codec=ChatCodec(tokenizer);profile=PolicyFormat.resolve(args.model,tokenizer=tokenizer,profile='qwen_xml')
-    params=SamplingParams(max_tokens=6144,temperature=1.,top_p=1.,top_k=-1,
+    params=SamplingParams(max_tokens=ACTOR_REPLY_LIMIT,temperature=1.,top_p=1.,top_k=-1,
         repetition_penalty=1.,logprobs=1)
     judge_sem=asyncio.Semaphore(8);Client=client_class(args.retriever_code)
     async with httpx.AsyncClient(timeout=600.,limits=httpx.Limits(max_connections=128)) as http, \

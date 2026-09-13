@@ -1,5 +1,52 @@
 # BrowseComp-Plus base critic pretraining
 
+## TRACE-style fresh pilot profile (September 13)
+
+`run_pilot.sh` now defaults to `BROWSECOMP_PROFILE=trace96k`: `browser.search`,
+line-numbered `browser.open`, literal `browser.find`, and native `submit`.
+Open/find take explicit stable docids, so navigation has no hidden cursor shared
+between branches. One tool call is accepted per task turn. Search defaults to ten
+results (maximum twenty); reads retain the 6,000-character cap and find returns at
+most twenty bounded matches with continuation offsets.
+
+The actor/server/trainer profile uses a 98,304-token context ceiling, 96 task turns
+including final submission, and a 16,384-token actor reply ceiling. The task horizon
+applies to the complete root-to-terminal path, including resumed branches. Early
+compaction remains at 14,336 prompt tokens or ten tool calls, and fold replies are
+limited to 4,096 tokens. Context exhaustion reduces the reply allowance or fails
+explicitly; it never truncates conditioning. Vocabulary log-probability computation
+uses 1,024-token chunks. A configured 96K ceiling does not establish that every
+96K training microbatch fits the assigned GPUs; peak-memory validation is separate.
+
+Fresh pilot critic publication now uses maximum absolute error **0.01**, matching
+PPO recovery. Version, context count, finite probability, and deterministic repeated
+inference checks remain mandatory; all numerical errors remain recorded. This
+changes publication tolerance, not semantic answer grading or training LR.
+The launcher defaults both actor and critic LR to 1e-6.
+
+Prepare the immutable overlay before launching:
+
+```sh
+/weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/.venv/bin/python \
+  examples/rollout_controller_critic_browsecomp/scripts/prepare_trace_harness.py \
+  --source /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller
+```
+
+This creates `snapshots/harness-trace-v1` from the existing frozen harness, replacing
+only the environment and adding its browser tools. It refuses to overwrite an
+existing snapshot. Every new collection and replay verifies its source hashes.
+The profile propagates through the native container and Ray workers. The collection
+contract records the profile and serializer sources; the critic receives the actual
+96-turn remaining horizon using the existing JSON schema. The original pretraining
+serializer and collection snapshot remain byte-for-byte intact. Promotion records
+the environment profile it actually exercised; old pilot results do not authorize
+the new profile. `BROWSECOMP_PROFILE=legacy` selects the previous environment for a
+fresh legacy attempt; old artifacts require their archived runtime sources.
+
+The earlier v4 pilot stopped at its second publication with max error 0.00885315
+against 0.005. Its failure report is retained; changing the new default does not
+retroactively mark that pilot successful.
+
 This isolated experiment collects fresh Qwen3.5-9B episodes with online compaction,
 then trains a native Megatron scalar critic for reuse with a fresh base actor.
 No actor optimizer is created. The existing deontic PPO experiment is separate.

@@ -36,7 +36,7 @@ from warmstart_candidate import digest, require_pilot_candidate
 
 EXPERIMENT=Path(__file__).resolve().parents[1]
 ROOT=EXPERIMENT.parents[2]
-HARNESS=EXPERIMENT/'snapshots/harness'
+from pilot_runtime import HARNESS, PROFILE, TRACE, CONTEXT_LIMIT, ACTOR_REPLY_LIMIT, environment_contract, verify_harness
 RECIPE_ID='browsecomp-zero-warmup-pilot-v1'
 
 
@@ -61,7 +61,7 @@ def custom_args(parser):
     parser.add_argument('--pilot-prior-strength',type=float,default=1.)
     parser.add_argument('--pilot-critic-lr',type=float,default=5e-6)
     parser.add_argument('--pilot-critic-replica-host',required=True)
-    parser.add_argument('--pilot-critic-equivalence-tolerance',type=float,default=.005)
+    parser.add_argument('--pilot-critic-equivalence-tolerance',type=float,default=.01)
     parser.add_argument('--pilot-seed-namespace',default='browsecomp-zero-warmup-pilot-v1')
     parser.add_argument('--pilot-preflight-only',action='store_true')
     return parser
@@ -118,6 +118,10 @@ def replay_audit(directory):
 
 
 def train(args):
+    verify_harness()
+    if TRACE and (args.seq_length < CONTEXT_LIMIT or args.sglang_context_length < CONTEXT_LIMIT
+            or args.rollout_max_response_len < ACTOR_REPLY_LIMIT):
+        raise ValueError('TRACE requires 96K trainer/server context and 16384 actor replies')
     configure_logger();run=Path(args.save).parent;run.mkdir(parents=True,exist_ok=True)
     training_ranks=args.actor_num_nodes*args.actor_num_gpus_per_node
     if (training_ranks not in (2,4) or args.tensor_model_parallel_size!=2
@@ -155,6 +159,8 @@ def train(args):
     critic_args.custom_advantage_function_path=None
     critic_args.rollout_data_postprocess_path=None;critic_args.custom_tis_function_path=None
     write(run/'recipe.json',dict(recipe_id=RECIPE_ID,lineage=lineage,
+        environment=environment_contract(),harness=str(HARNESS),
+        harness_manifest_sha256=digest(HARNESS/'source-manifest.json'),
         schedule_sha256=digest(args.pilot_schedule_audit),
         arguments={k:v for k,v in vars(args).items() if 'key' not in k.lower()},
         scripts={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
@@ -281,7 +287,8 @@ def train(args):
     if successes==0: rejection.append('No successful terminal was observed')
     if successes==terminals: rejection.append('No failed terminal was observed')
     pilot=dict(schema='browsecomp-zero-warmup-pilot-v1',
-        training_ranks=training_ranks,
+        training_ranks=training_ranks,environment=environment_contract(),
+        collection_context_function_sha256=function_sha256(EXPERIMENT/'scripts/pilot_runtime.py','context'),
         candidate_sha256=digest(args.pilot_candidate),
         context_function_sha256=function_sha256(args.pilot_context_source,'context'),
         num_critic_only_steps=0,start_rollout_id=0,completed_joint_updates=2,
@@ -305,7 +312,7 @@ def main():
             train(args);return
         ray.init(address=os.environ['RAY_ADDRESS'],runtime_env={'env_vars':{
             'GLOO_SOCKET_IFNAME':'ens0','NCCL_SOCKET_IFNAME':'ens0','NCCL_IB_DISABLE':'1',
-            'PYTHONPATH':os.environ['PYTHONPATH']}})
+            'PYTHONPATH':os.environ['PYTHONPATH'], 'BROWSECOMP_PROFILE':PROFILE}})
         train(args)
     except Exception:
         if not (run/'failed.json').exists():

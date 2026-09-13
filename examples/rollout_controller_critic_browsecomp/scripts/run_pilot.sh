@@ -2,6 +2,12 @@
 set -euo pipefail
 experiment_root=$(cd "$(dirname "$0")/.." && pwd)
 checkpoint=/weka/projects/bvandur1/zjiang31/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/c202236235762e1c871ad0ccb60c8ee5ba337b9a
+export BROWSECOMP_PROFILE=${BROWSECOMP_PROFILE:-trace96k}
+case "$BROWSECOMP_PROFILE" in
+  trace96k) context_limit=98304; server_context=98304; reply_limit=16384 ;;
+  legacy) context_limit=32768; server_context=65536; reply_limit=6144 ;;
+  *) echo "Unknown BROWSECOMP_PROFILE" >&2; exit 1 ;;
+esac
 run_name=${PILOT_RUN_NAME:?Set a fresh PILOT_RUN_NAME}
 run_root="$experiment_root/runs/$run_name"
 storage_root=${PILOT_STORAGE_ROOT:-/weka/projects/bvandur1/zjiang31/browsecomp-critic-ppo/runs}
@@ -46,7 +52,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --num-rollout 2 --num-critic-only-steps 0 --rollout-batch-size 6 \
   --n-samples-per-prompt 1 --num-steps-per-rollout 1 --global-batch-size 6 \
   --skip-eval-before-train --rollout-temperature 1 --rollout-top-p 1 --rollout-top-k -1 \
-  --rollout-max-response-len 6144 --advantage-estimator ppo \
+  --rollout-max-response-len "$reply_limit" --advantage-estimator ppo \
   --custom-advantage-function-path targets.prepared_advantages \
   --use-rollout-logprobs --get-mismatch-metrics --custom-tis-function-path pilot_on_policy.metrics \
   --use-kl-loss --kl-loss-coef 0.01 --kl-loss-type low_var_kl \
@@ -56,13 +62,15 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --tensor-model-parallel-size 2 --pipeline-model-parallel-size 1 \
   --context-parallel-size 1 --sequence-parallel --use-distributed-optimizer \
   --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 \
-  --seq-length 32768 --use-dynamic-batch-size --max-tokens-per-gpu 24576 --balance-data \
+  --max-position-embeddings "$context_limit" --seq-length "$context_limit" --use-dynamic-batch-size --max-tokens-per-gpu 24576 --balance-data \
+  --log-probs-chunk-size 1024 \
   --attention-dropout 0 --hidden-dropout 0 --attention-backend flash \
   --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
-  --sglang-mem-fraction-static 0.75 --sglang-context-length 65536 \
+  --sglang-mem-fraction-static 0.75 --sglang-context-length "$server_context" \
   --sglang-max-running-requests 24 --sglang-cuda-graph-max-bs 24 \
   --pilot-candidate "$candidate" --pilot-context-source "$experiment_root/scripts/collect.py" \
-  --pilot-critic-lr "${PILOT_CRITIC_LR:-5e-6}" \
+  --pilot-critic-lr "${PILOT_CRITIC_LR:-1e-6}" \
+  --pilot-critic-equivalence-tolerance "${PILOT_CRITIC_EQUIVALENCE_TOLERANCE:-0.01}" \
   --pilot-schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \
   --pilot-cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
   --pilot-retriever-code /weka/projects/bvandur1/zjiang31/browsecomp-plus-retriever \

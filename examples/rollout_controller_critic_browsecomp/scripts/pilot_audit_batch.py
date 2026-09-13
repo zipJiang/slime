@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import pickle
 
-from collect import context as serialize_context
+from pilot_runtime import context as serialize_context
 from examples.browsercomp_plus.env import RetrievalArchive, SearchEnv, load_cases
 from judge_contract import verdict
 from step_controller import DirectBranchTdEstimator
@@ -21,7 +21,7 @@ from semantic_judge import contract as judge_contract
 RECIPE_ID='browsecomp-zero-warmup-pilot-v1'
 EXPERIMENT=Path(__file__).resolve().parents[1]
 ROOT=EXPERIMENT.parents[2]
-HARNESS=EXPERIMENT/'snapshots/harness'
+from pilot_runtime import HARNESS, TOP_K, environment_contract, verify_harness
 CASES=ROOT/'rollout-controller/data/browsercomp-plus/cases.private.jsonl'
 
 
@@ -57,16 +57,23 @@ def audit_judge(records, *, question, references, terminal_pairs):
 
 
 def audit(directory):
+    verify_harness()
     from transformers import AutoTokenizer
     directory=Path(directory)
     contract=json.loads((directory/'contract.json').read_text())
+    sources={name:hashlib.sha256((EXPERIMENT/'scripts'/name).read_bytes()).hexdigest()
+        for name in ['pilot_runtime.py','pilot_context_bound.py']}
+    if contract.get('profile_sources')!=sources:
+        raise ValueError('Pilot profile sources changed after collection')
     summary=json.loads((directory/'summary.json').read_text())
+    if contract.get('environment')!=environment_contract():
+        raise ValueError('Pilot environment profile changed after collection')
     if contract['recipe_id']!=RECIPE_ID or contract['estimator']!='direct_branch_td':
         raise ValueError('Unknown pilot preparation contract')
     if hashlib.sha256(Path(__file__).with_name('pilot_collect.py').read_bytes()).hexdigest()!=contract['collector_sha256']:
         raise ValueError('Pilot collector source changed after collection')
     if (contract.get('checkpoint_context_function_sha256')!=function_sha256(
-            EXPERIMENT/'scripts/collect.py','context')
+            EXPERIMENT/'scripts/pilot_runtime.py','context')
             or contract.get('harness_manifest_sha256')!=hashlib.sha256(
                 (HARNESS/'source-manifest.json').read_bytes()).hexdigest()
             or contract.get('split_sha256')!=hashlib.sha256(
@@ -86,7 +93,7 @@ def audit(directory):
                    ('policy_version','server_weight_version','value_version'))):
         raise ValueError('Pilot summary version lineage differs from its contract')
     tokenizer=AutoTokenizer.from_pretrained(contract['checkpoint'],local_files_only=True)
-    tools=SearchEnv(RetrievalArchive()).schemas
+    tools=SearchEnv(RetrievalArchive(),top_k=TOP_K).schemas
     cases=load_cases(CASES)
     rc=RewardConfig(value_version=contract['value_version'],
         value_prior_strength=contract['prior_strength'],
