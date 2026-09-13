@@ -45,6 +45,7 @@ from semantic_judge import SemanticJudge, contract as judge_contract
 from semantic_reward import SemanticRewardExpander
 from targets import split_targets
 from provenance import function_sha256
+from remaining_value import RemainingValueScorer
 
 
 RECIPE_ID='browsecomp-zero-warmup-pilot-v1'
@@ -135,7 +136,9 @@ class BatchedValueClient(AsyncRewardModel):
 async def two_pass_search(prompt,workspace,runtime,spend,judge,*,pass_tokens,max_attempts,concurrency):
     root=await runtime.runner.start(prompt,workspace=workspace)
     state=SchedulerState.root(root,gating=ConcurrencyGating(concurrency))
-    critic=_value_head(runtime);await _score_root(critic,state)
+    critic=_value_head(runtime)
+    if critic is not None: critic=RemainingValueScorer(critic)
+    await _score_root(critic,state)
     if state.stats.get('score_failures',0):
         raise RuntimeError('Root prior failed; refusing unscored refinement')
     view=SchedulerView(state);ledger=RolloutLedger(runtime.config.reward_config);ledger.bind(view)
