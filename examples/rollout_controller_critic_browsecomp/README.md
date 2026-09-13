@@ -57,8 +57,14 @@ Pilot **402969** passed host preflight but stopped before model initialization:
 the native container could not see the host's `/projects` retriever alias.
 The launcher now uses its canonical `/weka/projects` path. The actual native
 container reproduces the full host preflight exactly after this fix. Replacement
-supervisor **403190** runs `browsecomp-zero-warmup-refine-lr1e6-v2` on the same
-seven GPUs. Live trainer memory fit and zero-warmup updates remain unverified.
+supervisor **403190** initialized both models successfully on two ranks. Its
+initial critic export matches every pretrained artifact hash, and initial
+native/portable prediction error is at most 0.00183064. Collection then rejected
+the seven-GPU infrastructure because its validator still assumed four trainer
+GPUs. That validator now checks the declared supported trainer layout; 15 focused
+tests and the actual collector check inside the native container pass.
+Current supervisor **403238** runs `browsecomp-zero-warmup-refine-lr1e6-v3` on the
+same seven GPUs. Training-time memory fit and zero-warmup updates remain unverified.
 
 - `CRITIC_TRAIN_JOBS` supplies two or four distinct two-GPU allocations. The head
   IP and training host count are derived from those allocations.
