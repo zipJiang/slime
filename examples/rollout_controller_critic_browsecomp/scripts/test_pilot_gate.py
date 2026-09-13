@@ -10,12 +10,19 @@ def write(path,value):
     path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value))
 
 
+def calibration():
+    return dict(calibration=dict(bins=[dict(lower=0.,upper=.1,weight=1.,contexts=1,
+        questions=1,predicted_mean=.05,target_mean=0.,absolute_gap=.05)],
+        expected_absolute_gap=.05,maximum_absolute_gap=.05))
+
+
 def fixture(tmp_path):
     base=tmp_path/'base';base.mkdir();training=tmp_path/'training';native=training/'native'
     checkpoint=native/'iter_0000015';checkpoint.mkdir(parents=True)
     write(training/'complete.json',dict(better_than_initial=True,better_than_constant=True,
         portable_inference_passed=True,inference=str(training/'inference'),
-        native_checkpoint=str(native),native_iteration=15))
+        native_checkpoint=str(native),native_iteration=15,
+        initial=calibration(),trained=calibration()))
     write(training/'native-validated.json',dict(updates=16,checkpoint=str(native),iteration=15))
     write(training/'reload-audit.json',dict(passed=True,cursors=[0]*4,
         optimizers=[dict(fresh=True)]*4,finetune=True,no_load_optim=True,no_load_rng=True))

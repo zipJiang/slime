@@ -1,6 +1,7 @@
 """Build and validate the critic handoff consumed by a future PPO pilot."""
 import hashlib
 import json
+import math
 from pathlib import Path
 
 
@@ -13,10 +14,53 @@ def read(path):
     return json.loads(Path(path).read_text())
 
 
+def validate_calibration(report, name):
+    calibration=report.get('calibration')
+    if not isinstance(calibration,dict) or not isinstance(calibration.get('bins'),list):
+        raise ValueError(f'{name} validation is missing calibration evidence')
+    bins=calibration['bins']
+    if not bins:
+        raise ValueError(f'{name} validation has no populated calibration bins')
+    weights=[];gaps=[];lowers=[]
+    for bucket in bins:
+        values=[bucket.get(key) for key in ('lower','upper','weight','predicted_mean',
+                                             'target_mean','absolute_gap')]
+        if (any(not isinstance(value,(int,float)) or not math.isfinite(value) for value in values)
+                or not 0<=bucket['lower']<bucket['upper']<=1
+                or not 0<bucket['weight']<=1
+                or not 0<=bucket['predicted_mean']<=1
+                or not 0<=bucket['target_mean']<=1
+                or not math.isclose(bucket['absolute_gap'],
+                                    abs(bucket['predicted_mean']-bucket['target_mean']),
+                                    abs_tol=1e-12,rel_tol=1e-12)
+                or not isinstance(bucket.get('contexts'),int) or bucket['contexts']<=0
+                or not isinstance(bucket.get('questions'),int) or bucket['questions']<=0):
+            raise ValueError(f'{name} validation has malformed calibration bins')
+        weights.append(bucket['weight']);gaps.append(bucket['absolute_gap'])
+        lowers.append(bucket['lower'])
+    expected=sum(weight*gap for weight,gap in zip(weights,gaps,strict=True))
+    reported_expected=calibration.get('expected_absolute_gap')
+    reported_maximum=calibration.get('maximum_absolute_gap')
+    if (any(not math.isclose(bucket['upper']-bucket['lower'],.1,
+                             abs_tol=1e-12,rel_tol=1e-12) for bucket in bins)
+            or lowers!=sorted(set(lowers))
+            or not isinstance(reported_expected,(int,float))
+            or not isinstance(reported_maximum,(int,float))
+            or not math.isfinite(reported_expected) or not math.isfinite(reported_maximum)
+            or not math.isclose(sum(weights),1.,abs_tol=1e-9,rel_tol=1e-9)
+            or not math.isclose(reported_expected,expected,
+                                abs_tol=1e-12,rel_tol=1e-12)
+            or not math.isclose(reported_maximum,max(gaps),
+                                abs_tol=1e-12,rel_tol=1e-12)):
+        raise ValueError(f'{name} validation calibration summary is inconsistent')
+
+
 def build_candidate(training, *, base_model, context_source_file_sha256,
                     context_function_sha256):
     training=Path(training).resolve()
     complete=read(training/'complete.json')
+    validate_calibration(complete.get('initial',{}),'initial')
+    validate_calibration(complete.get('trained',{}),'trained')
     native=read(training/'native-validated.json')
     reload=read(training/'reload-audit.json')
     inference=read(training/'inference-audit.json')
@@ -63,6 +107,7 @@ def build_candidate(training, *, base_model, context_source_file_sha256,
         native_weight_only_reload=True,
         native_checkpoint_full_readback=True,
         independent_collection_streams=True,
+        heldout_calibration_reported=True,
     )
     reasons=[name for name,passed in checks.items() if not passed]
     evidence=[training/name for name in ['complete.json','native-validated.json','reload-audit.json',

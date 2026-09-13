@@ -9,13 +9,20 @@ def write(path,value):
     path.write_text(json.dumps(value))
 
 
+def calibration():
+    return dict(calibration=dict(bins=[dict(lower=0.,upper=.1,weight=1.,contexts=1,
+        questions=1,predicted_mean=.05,target_mean=0.,absolute_gap=.05)],
+        expected_absolute_gap=.05,maximum_absolute_gap=.05))
+
+
 def fixture(tmp_path, *, better=True):
     (tmp_path/'base').mkdir()
     training=tmp_path/'training';native=training/'native';checkpoint=native/'iter_0000015'
     checkpoint.mkdir(parents=True)
     write(training/'complete.json',dict(better_than_initial=better,better_than_constant=better,
         portable_inference_passed=True,inference=str(training/'inference'),
-        native_checkpoint=str(native),native_iteration=15))
+        native_checkpoint=str(native),native_iteration=15,
+        initial=calibration(),trained=calibration()))
     write(training/'native-validated.json',dict(updates=16,checkpoint=str(native),iteration=15))
     write(training/'reload-audit.json',dict(passed=True,cursors=[0]*4,
         optimizers=[dict(fresh=True)]*4,finetune=True,no_load_optim=True,no_load_rng=True))
@@ -58,6 +65,15 @@ def test_inconsistent_checkpoint_readback_is_rejected(tmp_path):
     readback=training/'native/iter_0000015-readback.json'
     value=json.loads(readback.read_text());value['optimizer_steps']=[15];write(readback,value)
     with pytest.raises(ValueError,match='readback'):
+        build_candidate(training,base_model=tmp_path/'base',context_source_file_sha256='c'*64,
+                        context_function_sha256='0'*64)
+
+
+def test_missing_calibration_cannot_create_candidate(tmp_path):
+    training=fixture(tmp_path)
+    complete=json.loads((training/'complete.json').read_text())
+    complete['trained'].pop('calibration');write(training/'complete.json',complete)
+    with pytest.raises(ValueError,match='calibration evidence'):
         build_candidate(training,base_model=tmp_path/'base',context_source_file_sha256='c'*64,
                         context_function_sha256='0'*64)
 
