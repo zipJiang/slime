@@ -9,10 +9,8 @@ import math
 import os
 from pathlib import Path
 import pickle
-import subprocess
 import sys
 import time
-from urllib.parse import urlparse
 
 EXPERIMENT=Path(__file__).resolve().parents[1]
 ROOT=EXPERIMENT.parents[2]
@@ -46,10 +44,10 @@ from semantic_reward import SemanticRewardExpander
 from targets import split_targets
 from provenance import function_sha256
 from remaining_value import RemainingValueScorer
+from pilot_infrastructure import validate_infrastructure
 
 
 RECIPE_ID='browsecomp-zero-warmup-pilot-v1'
-JUDGE_CHECKPOINT=Path('/weka/projects/bvandur1/zjiang31/.cache/huggingface/hub/models--Qwen--Qwen3.5-27B/snapshots/fc05daec18b0a78c049392ed2e771dde82bdf654')
 
 
 def write_json(path,value):
@@ -63,34 +61,6 @@ def write_rows(path,rows):
     with gzip.open(temporary,'wt') as stream:
         for row in rows: stream.write(json.dumps(row,allow_nan=False)+'\n')
     temporary.replace(path)
-
-
-def validate_infrastructure(args,infrastructure):
-    from pilot_topology import required_gpus
-    if infrastructure.get('schema')!='browsecomp-zero-warmup-pilot-infrastructure-v1':
-        raise ValueError('Unknown pilot infrastructure contract')
-    retriever=args.retriever_code.resolve();index=(retriever/'indexes/qwen3-embedding-0.6b').resolve()
-    commit=subprocess.check_output(['git','-C',str(retriever),'rev-parse','HEAD'],text=True).strip()
-    clean=not bool(subprocess.check_output(
-        ['git','-C',str(retriever),'status','--porcelain'],text=True).strip())
-    hashes={}
-    for path in sorted(index.glob('*')):
-        if path.is_file():
-            with path.open('rb') as stream:
-                hashes[path.name]=hashlib.file_digest(stream,'sha256').hexdigest()
-    endpoints={urlparse(args.retriever_url).hostname,urlparse(args.judge_url).hostname}
-    gpus=infrastructure.get('gpus',{});required=infrastructure.get('required_gpus',{})
-    if (infrastructure.get('retriever_commit')!=commit
-            or infrastructure.get('retriever_tree_clean') is not True or not clean
-            or infrastructure.get('retriever_client_sha256')!=hashlib.sha256(
-                (retriever/'retriever/serve/client.py').read_bytes()).hexdigest()
-            or Path(infrastructure.get('retriever_index','')).resolve()!=index
-            or infrastructure.get('retriever_index_sha256')!=hashes
-            or Path(infrastructure.get('judge_checkpoint','')).resolve()!=JUDGE_CHECKPOINT.resolve()
-            or endpoints!={infrastructure.get('ips',{}).get('aux')}
-            or required!=required_gpus(infrastructure.get('jobs',{}))
-            or any(int(gpus.get(role,0))<count for role,count in required.items())):
-        raise ValueError('Pilot infrastructure differs from the recorded services or resources')
 
 
 class BatchedValueClient(AsyncRewardModel):
