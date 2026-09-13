@@ -53,9 +53,12 @@ Full checkpoint readback passes, model-only reload reproduces all 1,428 predicti
 exactly with fresh optimizer/cursor state on eight ranks, and portable inference
 matches native values within **0.00409136** on 64 held-out contexts. The generated
 `warmstart-candidate.json` passes independent reconstruction from its evidence.
-Pilot supervisor **402969** has started `browsecomp-zero-warmup-refine-lr1e6-v1`,
-passed CPU preflight, and is starting its auxiliary services. The pilot has not
-yet verified live trainer memory fit or zero-warmup updates.
+Pilot **402969** passed host preflight but stopped before model initialization:
+the native container could not see the host's `/projects` retriever alias.
+The launcher now uses its canonical `/weka/projects` path. The actual native
+container reproduces the full host preflight exactly after this fix. Replacement
+supervisor **403190** runs `browsecomp-zero-warmup-refine-lr1e6-v2` on the same
+seven GPUs. Live trainer memory fit and zero-warmup updates remain unverified.
 
 - `CRITIC_TRAIN_JOBS` supplies two or four distinct two-GPU allocations. The head
   IP and training host count are derived from those allocations.
