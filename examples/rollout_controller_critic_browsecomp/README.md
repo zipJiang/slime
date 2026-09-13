@@ -262,3 +262,16 @@ visibility of a GPU, but this mode does not create or train a model.
 Collection source files are pinned once the manifest is written. Changing those
 files while collection runs makes a subsequent resume fail. Audit them read-only
 first; fixes require an intentional source/data transition.
+
+
+The initial refined-critic pilot verified two-rank initialization and publication,
+but its first completed search exposed a live-policy provenance mismatch: the
+shared SFT fixture wrapper used the default `policy` version. The pilot collector
+now binds the live Slime policy directly and preserves its exact behavior channel
+through task and derived compactor runners. It saves complete search evidence
+before sample preparation and drains other questions on an individual failure.
+The real two-pass search/save/reload/preparation test passes for actor-0000 and
+actor-0001, including inside the training container. Slime source: `5ef9ecde`.
+Replacement supervisor **403526**, run `browsecomp-zero-warmup-refine-lr1e6-v4`,
+retains the same pretrained candidate and two-update zero-warmup recipe. Both
+actual joint updates and final promotion remain to be verified.
