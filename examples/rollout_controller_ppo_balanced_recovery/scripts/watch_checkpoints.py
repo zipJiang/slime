@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 
@@ -12,6 +13,23 @@ def write_json(path, value):
     temp = path.with_suffix(path.suffix+'.tmp')
     temp.write_text(json.dumps(value, indent=2)+'\n')
     temp.replace(path)
+
+
+def validation_command(command, driver_step):
+    """Run the pinned SIF on the driver's allocation if this host lacks it."""
+    if shutil.which('apptainer'):
+        return command
+    job = str(driver_step).partition('.')[0]
+    if not job.isdecimal():
+        raise ValueError('Checkpoint validation requires a numeric driver allocation')
+    return ['srun', f'--jobid={job}', '--overlap', '--mem=0', '--cpu-bind=none',
+            '-N1', '-n1', '-c4', *command]
+
+
+def require_success(outcomes):
+    failed = [name for name, report in outcomes.items() if not report['passed']]
+    if failed:
+        raise RuntimeError(f'Checkpoint validation failed: {failed}')
 
 
 def watch(run, once=False, retry_failed=False):
@@ -63,7 +81,8 @@ def watch(run, once=False, retry_failed=False):
             for kind, command in commands:
                 path = logs/f'{actor.name}-attempt{len(history)+1}-{kind}.log'
                 with path.open('w') as stream:
-                    result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
+                    result = subprocess.run(validation_command(command, recipe['driver_step']),
+                        stdout=stream, stderr=subprocess.STDOUT)
                 outcome['checks'][kind] = dict(exit_code=result.returncode, log=str(path.resolve()))
             outcome['passed'] = all(v['exit_code'] == 0 for v in outcome['checks'].values())
             outcome['finished_at'] = datetime.now(timezone.utc).isoformat()
@@ -71,10 +90,12 @@ def watch(run, once=False, retry_failed=False):
             write_json(evidence, outcomes)
             print(json.dumps(dict(checkpoint=actor.name, **outcome)), flush=True)
         if once:
+            require_success(outcomes)
             return
         probe = subprocess.run(['squeue', '--steps='+recipe['driver_step'], '-h', '-o', '%i'],
                                text=True, capture_output=True)
         if probe.returncode == 0 and recipe['driver_step'] not in probe.stdout.split():
+            require_success(outcomes)
             print('Driver is terminal; checkpoint observation finished.', flush=True)
             return
         time.sleep(30)
