@@ -27,10 +27,23 @@ def test_question_weighting_is_independent_of_fold_count():
     report=metrics(rows,[0,0,0],.5)
     assert report['mse']==.5
     assert report['baseline_mse']==.25
+    assert report['calibration']['expected_absolute_gap']==.5
+    assert report['calibration']['bins']==[dict(lower=0.,upper=.1,weight=1.,
+        contexts=3,questions=2,predicted_mean=0.,target_mean=.5,absolute_gap=.5)]
     fields=[dict(tokens=[1,2],response_length=1,reward=r['target'],loss_mask=[1],
         group_index=r['group_index'],metadata=r['metadata']) for r in rows]
     batch=training_data(fields,lane='critic',expected_groups=['a','b'])
     assert batch['rollout_mask_sums']==[2,2,1]
+
+
+def test_calibration_bins_use_question_balanced_mass():
+    rows=aggregate([row('a','root',0),row('a','fold',0),row('b','root',1)])
+    report=metrics(rows,[.05,.15,.95],.5)
+    bins=report['calibration']['bins']
+    assert [b['weight'] for b in bins]==[.25,.25,.5]
+    assert [b['target_mean'] for b in bins]==[0,0,1]
+    assert report['calibration']['expected_absolute_gap']==pytest.approx(.075)
+    assert report['calibration']['maximum_absolute_gap']==pytest.approx(.15)
 
 
 @pytest.mark.parametrize('target',[math.nan,math.inf,-.1,1.1])

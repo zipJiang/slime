@@ -70,9 +70,11 @@ loss/packing implementation. Additional epochs require an explicit experiment
 decision after validation. This does not add extra critic updates to a PPO batch.
 
 The driver evaluates the same held-out development prefixes before and after
-training, reports question-weighted MSE/MAE and root/fold strata, and compares
-against a constant fitted only on training data. A paired question bootstrap
-reports uncertainty in improvement over that constant.
+training, reports question-weighted MSE/MAE, ten-bin calibration gaps, and
+root/fold strata, and compares against a constant fitted only on training data.
+Calibration uses the same equal-question, equal-checkpoint-within-question measure
+as optimization. A paired question bootstrap reports uncertainty in improvement
+over the training-fitted constant.
 
 Expected files under `runs/base-v2/training/`:
 

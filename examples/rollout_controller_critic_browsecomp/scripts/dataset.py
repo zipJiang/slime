@@ -72,6 +72,29 @@ def metrics(rows, predictions, baseline):
         groups[row['group_index']].append((row,prediction))
     def mean(fn):
         return sum(sum(fn(r,p) for r,p in values)/len(values) for values in groups.values())/len(groups)
+    # Use the same measure as the loss: every question has equal total mass and
+    # its checkpoints divide that mass equally. Otherwise long failed traces
+    # would dominate calibration even though they do not dominate optimization.
+    bins=[dict(weight=0.,prediction=0.,target=0.,contexts=0,questions=set())
+          for _ in range(10)]
+    for question,values in groups.items():
+        weight=1/(len(groups)*len(values))
+        for row,prediction in values:
+            bucket=bins[min(9,int(prediction*10))]
+            bucket['weight']+=weight
+            bucket['prediction']+=weight*prediction
+            bucket['target']+=weight*row['target']
+            bucket['contexts']+=1
+            bucket['questions'].add(question)
+    calibration=[]
+    for index,bucket in enumerate(bins):
+        if not bucket['weight']: continue
+        prediction=bucket['prediction']/bucket['weight']
+        target=bucket['target']/bucket['weight']
+        calibration.append(dict(lower=index/10,upper=(index+1)/10,
+            weight=bucket['weight'],contexts=bucket['contexts'],
+            questions=len(bucket['questions']),predicted_mean=prediction,
+            target_mean=target,absolute_gap=abs(prediction-target)))
     gains=[sum((baseline-r['target'])**2-(p-r['target'])**2 for r,p in values)/len(values)
            for values in groups.values()]
     rng=random.Random(20260912)
@@ -81,7 +104,10 @@ def metrics(rows, predictions, baseline):
         mae=mean(lambda r,p:abs(p-r['target'])),
         predicted_mean=mean(lambda r,p:p),target_mean=mean(lambda r,p:r['target']),
         constant_baseline=baseline,baseline_mse=mean(lambda r,p:(baseline-r['target'])**2),
-        baseline_mse_improvement_ci95=[bootstrap[24],bootstrap[974]])
+        baseline_mse_improvement_ci95=[bootstrap[24],bootstrap[974]],
+        calibration=dict(bins=calibration,
+            expected_absolute_gap=sum(b['weight']*b['absolute_gap'] for b in calibration),
+            maximum_absolute_gap=max(b['absolute_gap'] for b in calibration)))
 
 
 def constant_baseline(rows):
