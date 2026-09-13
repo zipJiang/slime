@@ -86,3 +86,17 @@ def test_consumer_rechecks_evidence_hashes(tmp_path):
     write(training/'recipe.json',dict(changed=True))
     with pytest.raises(ValueError,match='evidence changed'):
         require_pilot_candidate(path)
+
+
+def test_handwritten_candidate_readiness_cannot_bypass_quality(tmp_path):
+    training=fixture(tmp_path,better=False)
+    candidate=build_candidate(training,base_model=tmp_path/'base',
+                              context_source_file_sha256='d'*64,
+                              context_function_sha256='1'*64)
+    candidate['ready_for_zero_warmup_pilot']=True
+    candidate['failed_candidate_checks']=[]
+    candidate['checks']['better_than_untrained']=True
+    candidate['checks']['better_than_train_fitted_constant']=True
+    path=training/'warmstart-candidate.json';write(path,candidate)
+    with pytest.raises(ValueError,match='exactly reproduce'):
+        require_pilot_candidate(path)

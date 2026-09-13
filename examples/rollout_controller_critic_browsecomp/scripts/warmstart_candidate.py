@@ -152,6 +152,11 @@ def require_pilot_candidate(path):
         evidence=(path.parent/relative).resolve()
         if not evidence.is_relative_to(path.parent) or digest(evidence)!=expected:
             raise ValueError(f'Critic warmstart evidence changed: {relative}')
+    rebuilt=build_candidate(path.parent,base_model=candidate['base_actor'],
+        context_source_file_sha256=candidate['context_source_file_sha256'],
+        context_function_sha256=candidate['context_function_sha256'])
+    if candidate!=rebuilt:
+        raise ValueError('Critic warmstart candidate does not exactly reproduce from evidence')
     return candidate
 
 
