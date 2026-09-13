@@ -68,7 +68,9 @@ shared SFT fixture wrapper labeled live actor traces with the default `policy`
 version. The pilot now binds the actual Slime policy directly, saves complete
 search evidence before preparation, and drains other questions on one failure.
 The two-pass search/save/reload/preparation test passes for actor-0000 and
-actor-0001, including inside the actual training container; 16 focused tests pass.
+actor-0001, including an actual bounded compaction turn, both terminal outcomes,
+and exact generated-token coverage. It also passes inside the actual training
+container; 16 focused tests pass.
 
 Current supervisor **403526** runs `browsecomp-zero-warmup-refine-lr1e6-v4` on the
 same seven GPUs. At September 13, 14:47 EDT, fresh generation is verified active.
@@ -273,4 +275,3 @@ visibility of a GPU, but this mode does not create or train a model.
 Collection source files are pinned once the manifest is written. Changing those
 files while collection runs makes a subsequent resume fail. Audit them read-only
 first; fixes require an intentional source/data transition.
-

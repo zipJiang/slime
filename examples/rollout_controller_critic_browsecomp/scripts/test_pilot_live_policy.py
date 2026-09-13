@@ -18,6 +18,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from transformers import AutoTokenizer
+from step_controller.harness.compaction.triggers import Trigger
 from pilot_collect import (make_live_runner, two_pass_search, serialize_context,
     ChatCodec, PolicyFormat, SamplingParams, SlimePolicy, Runtime, RolloutConfig,
     RewardConfig, AsyncRewardModel, RewardResult, prepare_samples, DirectBranchTdEstimator,
@@ -29,11 +30,14 @@ tokenizer=AutoTokenizer.from_pretrained(checkpoint,local_files_only=True)
 class Value(AsyncRewardModel):
     async def ascore(self,context): return RewardResult(score=.5)
 
-async def exercise(version):
+async def exercise(version,with_fold=False):
     spend=Counter(input_tokens=0,output_tokens=0,generations=0)
     async def post(url,payload):
-        answer='Paris' if spend['generations']%2==0 else 'London'
+        task_index=spend['generations']-int(with_fold)
+        answer='Paris' if task_index%2==0 else 'London'
         reply='<tool_call>\n<function=submit>\n<parameter=answer>'+answer+'</parameter>\n</function>\n</tool_call>'
+        if with_fold and spend['generations']==0:
+            reply='A short note for the continued search.'
         tokens=tokenizer.encode(reply,add_special_tokens=False)
         spend.update(input_tokens=len(payload['input_ids']),output_tokens=len(tokens),generations=1)
         return dict(text=reply,meta_info=dict(output_token_logprobs=[[-.1,t,None] for t in tokens],
@@ -47,6 +51,10 @@ async def exercise(version):
     assert runner.policy is policy and runner.policy.trainable
     nested=runner.derive(env=runner._env,system_prompt='Summarize.',max_steps=1,finish_prompt=None)
     assert nested.policy is policy
+    if with_fold:
+        class InitialFold(Trigger):
+            def fires(self,prompt,state): return spend['generations']==0
+        runner._compactor.trigger=InitialFold()
     rc=RewardConfig(value_version='critic-test',value_prior_strength=1.,config_id='smoke')
     runtime=Runtime(runner=runner,value_model=Value(),
         value_serialize=lambda p:serialize_context(p,tools,tokenizer),
@@ -55,6 +63,11 @@ async def exercise(version):
     state,passes=await two_pass_search(prompt,workspace,runtime,spend,judge,
         pass_tokens=1,max_attempts=2,concurrency=1)
     assert len(passes)==2 and not state.stats.get('failures',0)
+    assert {node.payload.reward_outcome for node in state.nodes.values()
+        if node.payload.done}=={0.,1.}
+    if with_fold:
+        assert any(turn.tag=='fold' and turn.tokens
+            for node in state.nodes.values() for turn in node.payload.turns)
     with tempfile.TemporaryDirectory() as directory:
         path=Path(directory)/'tree.pkl.gz'
         save_tree(path,state)
@@ -72,6 +85,7 @@ async def exercise(version):
 async def main():
     for version in ['actor-0000','actor-0001']:
         await exercise(version)
+        await exercise(version,with_fold=True)
     finished=[]
     async def fail(): raise ValueError('preparation failed')
     async def finish():
@@ -87,7 +101,7 @@ async def main():
     assert finished==[True]
     assert await collect_questions([finish()])==[{'saved':True}]
 asyncio.run(main())
-print('live policy search/preparation passed for both actor versions')
+print('live policy task/fold search/preparation passed for both actor versions')
 '''
     env=dict(os.environ,PYTHONPATH=os.pathsep.join([
         str(experiment/'snapshots/harness'),str(experiment/'scripts')]))
