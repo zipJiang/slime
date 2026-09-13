@@ -24,7 +24,7 @@ for argument in "$@"; do
     exec /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/.venv/bin/python \
       "$experiment_root/scripts/pilot_preflight.py" \
       --run "$run_root" --candidate "$candidate" \
-      --context-source "$experiment_root/scripts/collect.py" \
+      --context-source "${PILOT_CONTEXT_SOURCE:-$experiment_root/scripts/collect.py}" \
       --schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \
       --cases /weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/browsercomp-plus/cases.private.jsonl \
       --retriever-code /weka/projects/bvandur1/zjiang31/browsecomp-plus-retriever \
@@ -68,7 +68,7 @@ exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/scripts/wit
   --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
   --sglang-mem-fraction-static 0.75 --sglang-context-length "$server_context" \
   --sglang-max-running-requests 24 --sglang-cuda-graph-max-bs 24 \
-  --pilot-candidate "$candidate" --pilot-context-source "$experiment_root/scripts/collect.py" \
+  --pilot-candidate "$candidate" --pilot-context-source "${PILOT_CONTEXT_SOURCE:-$experiment_root/scripts/collect.py}" \
   --pilot-critic-lr "${PILOT_CRITIC_LR:-1e-6}" \
   --pilot-critic-equivalence-tolerance "${PILOT_CRITIC_EQUIVALENCE_TOLERANCE:-0.01}" \
   --pilot-schedule-audit "$experiment_root/data/pilot-schedule-audit.json" \

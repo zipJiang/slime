@@ -298,7 +298,7 @@ pass for topology, preflight, and promotion, and the native scheduler preserves
 all sample identities and question weights at DP=1 and DP=2. Two-GPU model initialization is verified; training-time peak memory remains
 to be tested by the live pilot.
 
-`PILOT_CRITIC_LR` overrides the pilot critic learning rate (default 5e-6).
+`PILOT_CRITIC_LR` overrides the pilot critic learning rate (default 1e-6).
 The pilot following `training-refine-lr1e6-v1` uses 1e-6, matching refinement.
 
 The supervisor validates allocation size and separation, performs the shared
@@ -322,3 +322,64 @@ visibility of a GPU, but this mode does not create or train a model.
 Collection source files are pinned once the manifest is written. Changing those
 files while collection runs makes a subsequent resume fail. Audit them read-only
 first; fixes require an intentional source/data transition.
+
+## Fresh TRACE critic warmup (September 13, evening)
+
+The user requested critic warmup before joint training on the new environment.
+Pilot **405170** was stopped before any joint update; its artifacts and explicit
+user-requested stop record are preserved. Independent deontic PPO **404358** keeps
+its nine GPUs.
+
+Fresh collection **405234**, `runs/trace96k-critic-warmup-v1`, uses all seven other
+GPUs: four H200s on gh203/gh205 and gh106 GPU0 generate base Qwen3.5-9B episodes;
+gh106 GPU1 judges outcomes; gh108 GPU0 serves retrieval. Gh108 GPU1 belongs to PPO.
+Five independently served base-model replicas each accept eight concurrent traces.
+The frozen question inventory remains 128 train / 32 development, four independent
+samples each, with no final-test access. This is fresh collection, not relabeling
+or replaying the old 48-turn traces. The profile is TRACE search/open/find,
+98,304 context tokens, 96 task turns, and up to 16,384 actor response tokens.
+Compaction remains enabled at 14,336 prompt tokens or ten calls, with 4,096-token
+fold responses. Complete snapshots, exact critic strings, retrieval observations,
+judge outcomes, hashes, and remaining 96-turn budgets are saved and read back.
+
+The dependent critic-only phase reuses six GPUs (three local TP2 pairs, DP3) and
+uses gh108 GPU0 for validation. The native DP3 preflight accepts the unchanged
+8-question optimizer batch, without discarding or duplicating training records.
+The H100 pair on gh106 has NV6 connectivity; the H200 pairs report NODE links.
+Tensor parallelism stays within each host. Validation evaluates immutable exports
+while the trainer proceeds through at most the next four-update block.
+
+Warmup loads `base-v2/training-refine-lr1e6-v1/native`, checkpoint 15, with fresh
+optimizer/RNG/cursor state. That retains the prior critic's useful refinement.
+Only the critic updates. LR is **1e-6**, probability MSE is unclipped during
+warmup, questions retain equal total loss, and roots receive **25%** of each
+question's loss while its fold checkpoints divide the other 75%. Questions with
+only one stratum retain total weight one. The root weighting is an explicit
+hypothesis motivated by the earlier roughly 5% root loss mass and overconfident
+roots, not an established improvement.
+
+There are at most two passes / 32 updates. Evaluate every four updates, stop after
+two validated boundaries without improvement (up to one additional block already
+in flight), and retain the earliest balanced validation MSE improvement of at
+least 1e-4. The starting critic participates in selection. Standard equal-question
+MSE/MAE, calibration, and separate root/fold metrics remain reported alongside the
+new balanced selection measure. Native checkpoints are saved at every validation
+boundary. The chosen checkpoint undergoes full tensor readback, model-only reload
+with fresh cursors and optimizer, and full held-out prediction comparison. Portable
+publication additionally checks each dev question's root and longest fold, exact
+repeated scores, versions, finite probabilities, and maximum error **0.01**.
+
+A candidate must improve aggregate and balanced validation MSE over the starting
+critic and train-fitted constant, and improve root MSE over the starting critic.
+If the starting critic wins, the run records that outcome and produces no new
+candidate. The supervisor never starts joint actor training automatically.
+A new candidate's serializer is `scripts/pilot_runtime.py`; a later pilot must set
+`PILOT_CONTEXT_SOURCE` to this file (the default remains `collect.py` for older
+candidates). The next pilot still starts its actor from base.
+
+Entry points are `operations/trace_warmup_supervisor.py` for collection and
+`operations/trace_train_supervisor.py` for its successful-completion dependency.
+Collection and training operations have distinct Slurm ownership and output
+folders. Only explicitly assigned device slots and child process groups are used.
+The 96K configuration and native packing preflight do not establish worst-case
+96K backward memory fit; actual compaction checkpoint lengths are recorded.

@@ -84,7 +84,7 @@ def build_candidate(training, *, base_model, context_source_file_sha256,
             or not readback['full_storage_read'] or not readback['finite_tensors']):
         raise ValueError('Native checkpoint readback does not match the trained critic')
     world_size=reload.get('world_size',4)
-    if (world_size not in (4,8) or reload['cursors']!=[0]*world_size
+    if (world_size not in (4,6,8) or reload['cursors']!=[0]*world_size
             or len(reload['optimizers'])!=world_size
             or not reload['passed']
             or not all(item['fresh'] for item in reload['optimizers'])
@@ -111,6 +111,12 @@ def build_candidate(training, *, base_model, context_source_file_sha256,
         independent_collection_streams=True,
         heldout_calibration_reported=True,
     )
+    if 'trace_quality' in complete:
+        quality=complete['trace_quality']
+        names=('balanced_improvement','balanced_better_than_constant','root_improvement')
+        if set(quality)!=set(names) or any(type(quality[name]) is not bool for name in names):
+            raise ValueError('Malformed TRACE warmup quality evidence')
+        checks.update({name:quality[name] for name in names})
     reasons=[name for name,passed in checks.items() if not passed]
     evidence=[training/name for name in ['complete.json','native-validated.json','reload-audit.json',
                                          'inference-audit.json','dataset-inventory.json','recipe.json',

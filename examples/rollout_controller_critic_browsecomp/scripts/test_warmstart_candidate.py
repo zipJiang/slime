@@ -116,3 +116,21 @@ def test_handwritten_candidate_readiness_cannot_bypass_quality(tmp_path):
     path=training/'warmstart-candidate.json';write(path,candidate)
     with pytest.raises(ValueError,match='exactly reproduce'):
         require_pilot_candidate(path)
+
+
+def test_six_rank_trace_warmup_requires_root_and_balanced_improvement(tmp_path):
+    training=fixture(tmp_path)
+    reload=json.loads((training/'reload-audit.json').read_text())
+    reload.update(world_size=6,cursors=[0]*6,optimizers=[dict(fresh=True)]*6)
+    write(training/'reload-audit.json',reload)
+    complete=json.loads((training/'complete.json').read_text())
+    complete['trace_quality']=dict(balanced_improvement=True,balanced_better_than_constant=True,root_improvement=False)
+    write(training/'complete.json',complete)
+    candidate=build_candidate(training,base_model=tmp_path/'base',context_source_file_sha256='a'*64,context_function_sha256='e'*64)
+    assert not candidate['ready_for_zero_warmup_pilot']
+    assert candidate['failed_candidate_checks']==['root_improvement']
+    complete['trace_quality']['root_improvement']=True
+    write(training/'complete.json',complete)
+    candidate=build_candidate(training,base_model=tmp_path/'base',context_source_file_sha256='a'*64,context_function_sha256='e'*64)
+    path=training/'warmstart-candidate.json';write(path,candidate)
+    assert require_pilot_candidate(path)['ready_for_zero_warmup_pilot']
