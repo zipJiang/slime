@@ -1,6 +1,8 @@
 {
-  "state": "queued_after_locbench_grpo",
-  "predecessor_run": "/weka/projects/bvandur1/zjiang31/locbench-grpo-9b/runs/loc-grpo-g8-c12-sep20-b",
+  "state": "watched_after_locbench_grpo",
+  "predecessor_run": "/weka/projects/bvandur1/zjiang31/locbench-grpo-9b/runs/loc-grpo-g8-c12-sep20-f-48k-8g",
+  "predecessor_operation": "/weka/scratch/jhu/bvandur1/zjiang31/slime-ppo-worktree/examples/rollout_controller_vine_locbench/operations/loc-grpo-g8-c12-sep20-f-48k-8g",
+  "predecessor_required_actor_updates": 97,
   "resume_actor": "/weka/projects/bvandur1/zjiang31/deontic-vine-9b/runs/vine-both-null-g5-c12-sep19-replacement-633715/actor",
   "resume_after_round": 26,
   "target_total_updates": 120,
@@ -8,6 +10,15 @@
   "value_rollouts_per_state": 1,
   "per_question_concurrency": 12,
   "execution": "synchronous_first_batch_then_overlap_after_exact_logprob_audit",
+  "handoff_watcher": "handoff_grpo_to_deontic_vine_sep20.py",
+  "sync_run": "vine-both-null-g4-c12-sep20-sync-r27",
+  "async_run": "vine-both-null-g4-c12-sep20-async-r28",
+  "assignments": [
+    "562163=4:0,1,2,3",
+    "486600=2:0,1",
+    "633715=2:0,1"
+  ],
+  "head": "562163",
   "workspace": {
     "actor": "NullWorkspace",
     "compactor": "NullWorkspace"
