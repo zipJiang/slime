@@ -20,7 +20,13 @@ sys.path.append(str(EXPERIMENT / 'snapshots/native-support-v1'))
 from examples.locbench.dataset import load_cases
 from examples.locbench.repository import prepare
 from examples.locbench.metrics import score
-from step_controller import FifoAllocator, GrpoEstimator, SearchPass, run_search
+from step_controller import (
+    FifoAllocator,
+    GatingPolicy,
+    GrpoEstimator,
+    SearchPass,
+    run_search,
+)
 from step_controller.config import RolloutConfig
 from step_controller.export import to_samples
 from step_controller.generation import SamplingParams
@@ -30,7 +36,7 @@ from step_controller.generation.slime import SlimePolicy
 from step_controller.loop import Runtime
 from step_controller.preparation import prepare_samples
 from step_controller.reward.config import RewardConfig
-from step_controller.scheduler import WidthGating
+from step_controller.scheduler import Gate
 from grpo_recipe import RECIPE_ID, target_source
 from targets import split_targets, zero_advantage_placeholder
 
@@ -58,6 +64,18 @@ class BoundedSlimePolicy(SlimePolicy):
             raise ValueError('Input exceeds context; no conditioning truncation')
         return await super().agenerate_tokens(
             prefix_tokens, replace(params, max_tokens=min(params.max_tokens, remaining)))
+
+
+class IndependentRootGating(GatingPolicy):
+    """Fan out at the prompt while keeping each compacted trajectory linear."""
+
+    def __init__(self, width):
+        if width < 1:
+            raise ValueError('Root width must be positive')
+        self.width = width
+
+    def gate(self, node):
+        return Gate(self.width if node.parent_id is None else 1, count_children=True)
 
 
 async def run(args):
@@ -141,7 +159,7 @@ async def run(args):
             runtime = Runtime(runner=runner, config=RolloutConfig(
                 reward_config=reward,
                 passes=(SearchPass(FifoAllocator(), budget=args.group_size,
-                                   gating=WidthGating(args.group_size)),),
+                                   gating=IndependentRootGating(args.group_size)),),
                 max_concurrency=min(args.concurrency, args.group_size)))
             state = await run_search(prompt, runtime, workspace=workspace)
             prepared = prepare_samples(state, estimator=GrpoEstimator(),
