@@ -398,9 +398,57 @@ def _allocate_rollout_engine_addr_and_ports_normal(
 ):
     """Allocate rank-local SGLang and distributed-init ports for one group."""
     gpus_per_engine = num_gpus_per_engine or args.rollout_num_gpus_per_engine
+    node_port_cursor: dict[int | str, int] = {}
+    # A single ``num_gpus_per_node`` cannot describe a placement such as
+    # 4+2+2 GPUs.  For engines contained within one node, ask every scheduled
+    # Ray actor for its actual host and keep an independent port cursor per
+    # host.  Rank arithmetic is only valid for a homogeneous topology and can
+    # otherwise make an actor on host C try to bind host B's address.
+    if gpus_per_engine <= args.num_gpus_per_node:
+        locations = ray.get(
+            [engine._get_current_node_ip_and_free_port.remote() for _, engine in rollout_engines]
+        )
+        hosts = {
+            rank: location[0]
+            for (rank, _engine), location in zip(rollout_engines, locations, strict=True)
+        }
+        addr_and_ports: dict[int, dict] = {}
+        for rank, engine in rollout_engines:
+            host = hosts[rank]
+            start_port = node_port_cursor.get(host, base_port)
+
+            def port(consecutive=1):
+                nonlocal start_port
+                actual_host, allocated_port = ray.get(
+                    engine._get_current_node_ip_and_free_port.remote(
+                        start_port=start_port, consecutive=consecutive
+                    )
+                )
+                if actual_host != host:
+                    raise RuntimeError(
+                        f"Rollout engine {rank} moved hosts during startup: "
+                        f"{host} -> {actual_host}"
+                    )
+                start_port = allocated_port + consecutive
+                node_port_cursor[host] = start_port
+                return allocated_port
+
+            values = {
+                "host": host,
+                "port": port(),
+                "nccl_port": port(),
+            }
+            if worker_type == "prefill":
+                values["disaggregation_bootstrap_port"] = port()
+            values["dist_init_addr"] = f"{host}:{port(30 + args.sglang_dp_size)}"
+            addr_and_ports[rank] = values
+
+        for rank, _ in rollout_engines:
+            logger.info(f"Ports for engine {rank}: {addr_and_ports[rank]}")
+        return addr_and_ports, node_port_cursor
+
     num_engines_per_node = max(1, args.num_gpus_per_node // gpus_per_engine)
     addr_and_ports: dict[int, dict] = {}
-    node_port_cursor: dict[int, int] = {}
 
     visited_nodes = set()
     for rank, engine in rollout_engines:
