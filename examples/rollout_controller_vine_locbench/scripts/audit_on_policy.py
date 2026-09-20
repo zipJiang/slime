@@ -28,12 +28,21 @@ def check(args, rollout_id, data):
         mask = mask.to(device=new.device,dtype=torch.bool)
         differences.append((new-old.to(new.device))[mask].detach().float())
     diff = torch.cat(differences)
-    if not diff.numel() or not torch.isfinite(diff).all():
-        raise ValueError('Missing or nonfinite current/behavior token log probabilities')
-    report = dict(rollout_id=rollout_id, rank=dist.get_rank(), tokens=diff.numel(), lineage=lineage,
-                  mean_abs_difference=diff.abs().mean().item(),
-                  p99_abs_difference=diff.abs().quantile(.99).item(),
-                  mean_ratio=diff.exp().mean().item())
+    if diff.numel() and not torch.isfinite(diff).all():
+        raise ValueError('Nonfinite current/behavior token log probabilities')
+    # A whole GRPO batch can legitimately contain only equal-reward groups.
+    # Their retained shape placeholders have fully masked loss, so there are no
+    # policy tokens to compare.  Record that state explicitly and let Slime run
+    # the zero-loss optimizer step; rejecting it would make a valid batch crash
+    # before checkpoint/update counters can remain aligned.
+    all_masked = not diff.numel()
+    report = dict(
+        rollout_id=rollout_id, rank=dist.get_rank(), tokens=diff.numel(),
+        all_masked=all_masked, lineage=lineage,
+        mean_abs_difference=0.0 if all_masked else diff.abs().mean().item(),
+        p99_abs_difference=0.0 if all_masked else diff.abs().quantile(.99).item(),
+        mean_ratio=1.0 if all_masked else diff.exp().mean().item(),
+    )
     directory = Path(args.save).parent/'on-policy-audit'
     directory.mkdir(parents=True,exist_ok=True)
     (directory/f'round-{rollout_id:04d}-rank-{dist.get_rank()}.json').write_text(json.dumps(report,indent=2)+'\n')
