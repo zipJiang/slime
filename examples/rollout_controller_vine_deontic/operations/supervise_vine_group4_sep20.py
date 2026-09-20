@@ -1,4 +1,4 @@
-"""Run the corrected group-4, k=3 Deontic VinePPO continuation.
+"""Run the corrected group-4 Deontic VinePPO continuation.
 
 The caller supplies physical reservations.  A first invocation can run exactly
 one synchronous update from the last accepted group-5/k=1 checkpoint; a second
@@ -47,7 +47,7 @@ def main():
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--resume-run", type=Path, required=True)
     parser.add_argument("--group-size", type=int, default=4)
-    parser.add_argument("--value-rollouts-per-state", type=int, default=3)
+    parser.add_argument("--value-rollouts-per-state", type=int, default=1)
     parser.add_argument("--resume-group-size-from", type=int)
     parser.add_argument("--resume-value-rollouts-from", type=int)
     parser.add_argument("--search-concurrency", type=int, default=12)

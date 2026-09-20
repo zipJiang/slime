@@ -5,7 +5,7 @@
   "resume_after_round": 26,
   "target_total_updates": 120,
   "actor_group_size": 4,
-  "value_rollouts_per_state": 3,
+  "value_rollouts_per_state": 1,
   "per_question_concurrency": 12,
   "execution": "synchronous_first_batch_then_overlap_after_exact_logprob_audit",
   "workspace": {
@@ -13,10 +13,9 @@
     "compactor": "NullWorkspace"
   },
   "resume_authorizations": {
-    "group_size_from": 5,
-    "value_rollouts_per_state_from": 1
+    "group_size_from": 5
   },
-  "reason": "Resume the last accepted checkpoint before the rejected batch-composition-dependent round 27; reduce retained-root cost while lowering high-variance k=1 Monte Carlo value differences.",
+  "reason": "Resume the last accepted checkpoint before the rejected batch-composition-dependent round 27 and reduce retained-root cost while retaining the requested k=1 VinePPO value-rollout contract.",
   "rejected_successor": "/weka/projects/bvandur1/zjiang31/deontic-vine-9b/runs/vine-both-null-g5-c12-sep20-audited-r26/scientific-rejection.json",
   "created_at": "2026-09-20T15:27:00-04:00"
 }
