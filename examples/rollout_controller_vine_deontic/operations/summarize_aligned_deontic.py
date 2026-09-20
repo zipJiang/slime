@@ -17,6 +17,7 @@ def read(path: Path) -> dict:
 
 
 def atomic_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(value)
     temporary.replace(path)
@@ -46,6 +47,7 @@ def main() -> None:
         raise ValueError("Question-list digest changed")
 
     results = []
+    raw_observations: list[dict] = []
     failures = []
     for item in manifest["checkpoints"]:
         label = item["checkpoint"]
@@ -66,6 +68,21 @@ def main() -> None:
         cells: dict[tuple[str, bool], list[dict]] = defaultdict(list)
         for row in rows:
             cells[(row["domain"], bool(row["hard"]))].append(row)
+            # Keep one lossless, case-addressable observation for paired
+            # bootstrap intervals and method-difference confidence regions.
+            # The source result directories retain the full JSON and native
+            # trajectory artifacts; this compact export remains self-contained
+            # even for results reused through symlinks.
+            raw_observations.append({
+                "protocol": manifest["protocol"],
+                "question_sha256": digest,
+                "checkpoint": label,
+                "method": item["method"],
+                "actor_update": item["actor_update"],
+                "native_iteration": item["native_iteration"],
+                "source_run": item["source_run"],
+                **row,
+            })
         result = {
             **item,
             "overall": metric(rows),
@@ -96,6 +113,36 @@ def main() -> None:
         "time": time.time(),
     }
     atomic_text(operation / "report.json", json.dumps(state, indent=2) + "\n")
+
+    # Store both a single analysis-friendly table and one file per checkpoint.
+    # Rows are kept in the frozen question order within each checkpoint so a
+    # paired bootstrap can resample case indices without a join ambiguity.
+    raw_observations.sort(key=lambda row: (
+        row["actor_update"], row["method"], row["group_index"]
+    ))
+    raw_lines = "".join(json.dumps(row, sort_keys=True) + "\n"
+                        for row in raw_observations)
+    atomic_text(operation / "bootstrap" / "observations.jsonl", raw_lines)
+    by_checkpoint: dict[str, list[dict]] = defaultdict(list)
+    for row in raw_observations:
+        by_checkpoint[row["checkpoint"]].append(row)
+    for label, rows in by_checkpoint.items():
+        rows.sort(key=lambda row: row["group_index"])
+        atomic_text(
+            operation / "bootstrap" / "checkpoints" / f"{label}.jsonl",
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+        )
+    atomic_text(operation / "bootstrap" / "manifest.json", json.dumps({
+        "protocol": manifest["protocol"],
+        "question_sha256": digest,
+        "question_count": len(expected_keys),
+        "completed_checkpoints": [row["checkpoint"] for row in results],
+        "observations": len(raw_observations),
+        "row_order": "actor_update, method, group_index",
+        "pairing_key": "group_index and case_key",
+        "fields": sorted(raw_observations[0]) if raw_observations else [],
+        "time": time.time(),
+    }, indent=2) + "\n")
 
     columns = ["method", "actor_update", "native_iteration", "correct", "total",
                "accuracy", "hard_correct", "hard_total", "hard_accuracy",
