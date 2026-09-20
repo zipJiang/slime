@@ -39,7 +39,12 @@ while True:
     try:
         probe = subprocess.run(['squeue','--steps='+step,'-h','-o','%i'],
             capture_output=True,text=True,timeout=30)
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # This process runs beside a large Ray/SGLang topology.  A transient
+        # local fork failure or Slurm timeout says nothing about checkpoint
+        # validity or driver liveness, so leave training alone and re-observe.
+        print(f'Transient driver-step observation failure: {exc!r}',
+              file=sys.stderr, flush=True)
         time.sleep(30)
         continue
     if probe.returncode == 0 and step not in probe.stdout.split():

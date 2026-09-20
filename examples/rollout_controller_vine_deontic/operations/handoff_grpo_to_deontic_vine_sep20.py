@@ -20,11 +20,11 @@ E = Path(__file__).resolve().parents[1]
 OPERATIONS = E / "operations"
 GRPO_RUN = Path(
     "/weka/projects/bvandur1/zjiang31/locbench-grpo-9b/runs/"
-    "loc-grpo-g8-c12-sep20-f-48k-8g"
+    "loc-grpo-g8-c12-sep20-g-48k-8g"
 )
 GRPO_OPERATION = (
     E.parent / "rollout_controller_vine_locbench" / "operations"
-    / "loc-grpo-g8-c12-sep20-f-48k-8g"
+    / "loc-grpo-g8-c12-sep20-g-48k-8g"
 )
 REQUIRED_GRPO_UPDATES = 97
 SOURCE_VINE_RUN = Path(
