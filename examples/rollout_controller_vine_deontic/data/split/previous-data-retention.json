@@ -1,0 +1,42 @@
+{
+  "sources": [
+    {
+      "source": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/compaction-mixed-9b/data/mixed-v1/train.jsonl",
+      "previous_unique_cases": 57,
+      "in_new_train": 57,
+      "missing": []
+    },
+    {
+      "source": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-grpo-9b/data/train-questions-v2.jsonl",
+      "previous_unique_cases": 57,
+      "in_new_train": 57,
+      "missing": []
+    },
+    {
+      "source": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-ppo-9b/data/train-questions-v2.jsonl",
+      "previous_unique_cases": 57,
+      "in_new_train": 57,
+      "missing": []
+    },
+    {
+      "source": "/weka/scratch/jhu/bvandur1/zjiang31/slime-ppo-worktree/examples/rollout_controller_ppo/data/train-questions-v2.jsonl",
+      "previous_unique_cases": 57,
+      "in_new_train": 57,
+      "missing": []
+    }
+  ],
+  "training_union": {
+    "previous_cases": 63,
+    "in_new_train": 63,
+    "families": 57
+  },
+  "training_with_relatives": {
+    "cases": 76,
+    "in_new_train": 76
+  },
+  "historical_validation": {
+    "cases": 13,
+    "in_new_train": 13
+  },
+  "passed": true
+}

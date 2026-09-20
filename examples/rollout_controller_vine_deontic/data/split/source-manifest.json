@@ -1,0 +1,164 @@
+{
+  "format": "deontic_expanded_eval_v1",
+  "statistics": {
+    "airline": {
+      "total_cases": 300,
+      "direct_training_cases": 23,
+      "excluded_with_siblings": 23,
+      "eligible_cases": 277,
+      "eligible_families": 277,
+      "hard_eligible_cases": 77
+    },
+    "sara_numeric": {
+      "total_cases": 100,
+      "direct_training_cases": 27,
+      "excluded_with_siblings": 27,
+      "eligible_cases": 73,
+      "eligible_families": 73,
+      "hard_eligible_cases": 23
+    },
+    "sara_binary": {
+      "total_cases": 276,
+      "direct_training_cases": 13,
+      "excluded_with_siblings": 26,
+      "eligible_cases": 250,
+      "eligible_families": 89,
+      "hard_eligible_cases": 24
+    }
+  },
+  "total_cases": 676,
+  "direct_training_cases": 63,
+  "excluded_with_siblings": 76,
+  "eligible_cases": 600,
+  "eligible_families": 439,
+  "previous_validation_cases": [
+    "airline/airline_cases_complexity_0_airline_cases_18",
+    "airline/airline_cases_complexity_1_airline_cases_15",
+    "airline/airline_cases_complexity_1_airline_cases_61",
+    "airline/airline_cases_complexity_2_airline_cases_23",
+    "airline/airline_cases_complexity_2_airline_cases_65",
+    "sara_binary/s152_c_1_neg",
+    "sara_binary/s1_c_i_neg",
+    "sara_numeric/tax_case_13",
+    "sara_numeric/tax_case_4",
+    "sara_numeric/tax_case_53",
+    "sara_numeric/tax_case_61",
+    "sara_numeric/tax_case_74",
+    "sara_numeric/tax_case_83"
+  ],
+  "new_cases": 587,
+  "protocol": "One trajectory per case per checkpoint (pass@1); each model uses its training submission protocol.",
+  "exclusion_rule": "Union of imitation and RL training cases; exclude transitive identical normalized facts and SARA binary pos/neg siblings.",
+  "sources": [
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/airline/whole.jsonl",
+      "sha256": "0ea4f658d5840a73a21b41467119fc1d012719cff58062b2265904d1e6b39b11",
+      "rows": 300
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/airline/hard.jsonl",
+      "sha256": "3e5709ad6b1b5cf5b325aacbfcb2df5970d49fdce6b9a8cebd9e32d80f5f0954",
+      "rows": 80
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/airline/train.jsonl",
+      "sha256": "70ea5235ddc8664fffb398137d433f19ebec7097474d0778d137e41e263d770e",
+      "rows": 220
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/airline/eval.jsonl",
+      "sha256": "8508aef11525ccae56d369a45fc2cd81abddfbdac380c05de1fa6253fd5fb885",
+      "rows": 80
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_numeric/whole.jsonl",
+      "sha256": "b93e330b245f8732e9edd3b92fc4430b3549cd786876d6007b2889f555223970",
+      "rows": 100
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_numeric/hard.jsonl",
+      "sha256": "c216c6b8ddafb860d22f8d709d8c80219f95eef6fc12d6593e545a8fac73818d",
+      "rows": 35
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_numeric/train.jsonl",
+      "sha256": "5edd5dc38c763ad18a535e68c42bdc1beef824e19c71afe7b81ab7c60fae0125",
+      "rows": 65
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_numeric/eval.jsonl",
+      "sha256": "4ceb392af9cbbe809ad531fbb0fa33dbbc1a66daebf3d2c491f6a7054645459a",
+      "rows": 35
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_binary/whole.jsonl",
+      "sha256": "067de4130812decc4d9fd455740e6bb516337af5134a97dbc9d5668d56c924c1",
+      "rows": 276
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_binary/hard.jsonl",
+      "sha256": "400ad8f6cb79c46b971dc469ca7f02f5d0a4524db99a495c14287ef0b79d11d2",
+      "rows": 30
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_binary/train.jsonl",
+      "sha256": "afc78e7e47f89705c5ef8781f0a68589ed871fcd18fc6f5b965e15c94a850e0f",
+      "rows": 246
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-distill/data/deontic/sara_binary/eval.jsonl",
+      "sha256": "f198920736e3397bee34444bf56cd8c165923723195325c1583180dcfdc1a28e",
+      "rows": 30
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/deontic/airline/whole.jsonl",
+      "sha256": "0ea4f658d5840a73a21b41467119fc1d012719cff58062b2265904d1e6b39b11",
+      "rows": 300
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/deontic/airline/hard.jsonl",
+      "sha256": "3e5709ad6b1b5cf5b325aacbfcb2df5970d49fdce6b9a8cebd9e32d80f5f0954",
+      "rows": 80
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/data/deontic/sara_binary/whole.jsonl",
+      "sha256": "067de4130812decc4d9fd455740e6bb516337af5134a97dbc9d5668d56c924c1",
+      "rows": 276
+    }
+  ],
+  "training_sources": [
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/compaction-mixed-9b/data/mixed-v1/train.jsonl",
+      "sha256": "d14db69f916797810ffe03dd6123155f213f845761e22c0ddc67eb8a956a8bd9",
+      "purpose": "Mixed imitation training used to initialize distilled GRPO"
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-grpo-9b/data/train-questions-v2.jsonl",
+      "sha256": "ef36f86fdec446b43d3436acbdb7bfd31c0584a21436ed9b93d3f70586ed07b6",
+      "cases": 57,
+      "purpose": "RL training question pool"
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/deontic-ppo-9b/data/train-questions-v2.jsonl",
+      "sha256": "ef36f86fdec446b43d3436acbdb7bfd31c0584a21436ed9b93d3f70586ed07b6",
+      "cases": 57,
+      "purpose": "RL training question pool"
+    },
+    {
+      "path": "/weka/scratch/jhu/bvandur1/zjiang31/slime-ppo-worktree/examples/rollout_controller_ppo/data/train-questions-v2.jsonl",
+      "sha256": "ef36f86fdec446b43d3436acbdb7bfd31c0584a21436ed9b93d3f70586ed07b6",
+      "cases": 57,
+      "purpose": "RL training question pool"
+    }
+  ],
+  "family_builder": {
+    "path": "/weka/scratch/jhu/bvandur1/zjiang31/trl-train/experiments/compaction-respect-9b/scripts/standardize.py",
+    "sha256": "9176abb7ddd0e25c794419b343d396e670a8af8aba6ff7fb79a180f48dbaee22"
+  },
+  "outputs": {
+    "airline.jsonl": "274caa3224802aac64d4272eeb513ff59648af58155c7e40966a2bc4fea903da",
+    "questions.jsonl": "933d9a55dbf64d3b5cf5aa64aaa299f8e1220f5bb5199ecfe66873fd02f5729e",
+    "sara_binary.jsonl": "f3f1562fff2c45ce98848722528fb3e22a33deadaeddc1efacf36879cb36f1fa",
+    "sara_numeric.jsonl": "ae0bac3c826bc442c23b7b283aede61314a4169aedea3a44fd69d26251dcd061"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "cases": 676,
+  "families": 496,
+  "train_cases": 338,
+  "test_cases": 338,
+  "train_families": 248,
+  "test_families": 248,
+  "leakage_checks": "passed",
+  "historical_family_rule_equivalence": true,
+  "byte_identical_rebuild": true,
+  "balanced_schedule_rows": 6000,
+  "all_six_cells_have_1000_draws": true,
+  "manifest_sha256": "7fddb015c5d060e78c9042c591c7081ded3544d99b6d5429ba9c96756f20e748",
+  "audit_script_sha256": "d9d7e308ff7c08cfa58ce16248ecb36e5d55fdadf6f20b825e63323c561e56b9",
+  "schedule_sha256": "05aad8717589a22e94be25e4453f909db9a3dbc8a1f6202370447df68d78bf2e"
+}
