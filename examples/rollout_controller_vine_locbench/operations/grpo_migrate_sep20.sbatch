@@ -40,7 +40,7 @@ exec /usr/bin/python3 operations/supervise_grpo_recovery_sep20.py \
   --num-rollout 97 \
   --drain-seconds 7200 \
   --assign 562163=0,1,2,3 \
-  --assign 486600=0,1 \
+  --assign 423716=0,1,2,3 \
   --assign 633715=0,1 \
   --head 562163 \
   --driver-arg=--max-tokens-per-gpu --driver-arg=49152 \
