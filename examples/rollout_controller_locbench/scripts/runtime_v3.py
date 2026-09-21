@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from pathlib import Path
 import sys
@@ -16,10 +17,29 @@ REPLY_LIMIT = 16384
 
 
 def activate() -> None:
-    """Put this immutable harness first even if a legacy runtime was imported."""
+    """Select this harness even after another frozen harness was imported.
+
+    Moving this snapshot to the front cannot change an existing package's
+    ``__path__``.  Evict only stale harness-owned packages so every subsequent
+    import resolves from one coherent immutable tree.
+    """
     value = str(HARNESS)
     sys.path[:] = [entry for entry in sys.path if entry != value]
     sys.path.insert(0, value)
+    harness = HARNESS.resolve()
+    for name, module in tuple(sys.modules.items()):
+        if not (
+            name == "examples"
+            or name.startswith("examples.locbench")
+            or name.startswith("examples.toolkit")
+            or name == "step_controller"
+            or name.startswith("step_controller.")
+        ):
+            continue
+        source = getattr(module, "__file__", None)
+        if source is None or not Path(source).resolve().is_relative_to(harness):
+            sys.modules.pop(name, None)
+    importlib.invalidate_caches()
 
 
 def digest(path):
