@@ -97,16 +97,19 @@ def materialize(directory,cutoff):
 
 
 def replay_benchmark(args,run,plan,*,schedule_hash,behavior_version,value_url):
-    """Reuse only an audited, untrained base-policy batch for isolated timing."""
+    """Reuse only an audited, untrained batch from the identical base behavior."""
     import shutil
     from ppo_runtime import environment
     expected_environment = environment(getattr(args, 'loc_collection_profile', 'original'))
-    if not args.loc_benchmark_only or args.loc_resume_run:
-        raise ValueError('Saved batch reuse is restricted to fresh benchmark-only attempts')
+    if args.loc_resume_run:
+        raise ValueError('Saved base-policy collection cannot seed a resumed model')
     source=Path(args.loc_benchmark_source).resolve()
-    producer=json.loads((source.parent.parent/'recipe.json').read_text())
+    producer_root=source.parent.parent
+    producer=json.loads((producer_root/'recipe.json').read_text())
     recipe=json.loads((source/'contract.json').read_text())
     summary=json.loads((source/'summary.json').read_text())
+    checkpoints=list((producer_root/'checkpoints').glob('round-*.json'))
+    failure=json.loads((producer_root/'failed.json').read_text()) if (producer_root/'failed.json').exists() else None
     if (producer['candidate_sha256']!=digest(args.loc_candidate) or producer['schedule_sha256']!=schedule_hash
         or producer['environment']!=expected_environment or producer['resume'] is not None
         or recipe['environment']!=expected_environment or recipe['case_ids']!=plan['batches'][0]
@@ -118,17 +121,20 @@ def replay_benchmark(args,run,plan,*,schedule_hash,behavior_version,value_url):
         or recipe['max_pass_attempts']!=args.loc_max_pass_attempts
         or recipe['concurrency']!=args.loc_search_concurrency):
         raise ValueError('Saved benchmark batch has another base policy, critic, schedule or search recipe')
+    if (checkpoints or (producer_root/'training-complete.json').exists()
+        or (failure is not None and (failure.get('actor_updates') or failure.get('critic_updates')))):
+        raise ValueError('Saved benchmark batch comes from a model that already took an optimizer step')
     if any(summary[k]!=recipe[k] for k in ('policy_version','value_version','server_weight_version')):
         raise ValueError('Saved benchmark summary has another behavior identity')
     target=Path(run)/'pilot-rollouts/train-0000'
-    shutil.copytree(source,target,ignore=shutil.ignore_patterns('exports','training-lineage.json',
+    shutil.copytree(source,target,ignore=shutil.ignore_patterns('exports','failed.json','training-lineage.json',
         'training-complete.json','target-replay-audit.json','target-replay-audit.log'))
     frozen=dict(rollout_id=0,behavior_round=0,policy_version='actor-0000',server_weight_version=behavior_version,
         value_version='critic-0000',value_url=value_url,seed_namespace=f'{args.loc_seed_namespace}/0000')
     evidence=dict(source=str(source),source_recipe_sha256=digest(source.parent.parent/'recipe.json'),
         source_contract_sha256=digest(source/'contract.json'),source_summary_sha256=digest(source/'summary.json'),
         collection_rollout_gpus=producer['arguments']['rollout_num_gpus'],
-        scope='Isolated benchmark only; collection time comes from the original producer; targets are replay-audited again')
+        scope='Fresh base-policy benchmark/training seed; collection time comes from the original producer; targets are replay-audited again')
     (Path(run)/'benchmark-source.json').write_text(json.dumps(evidence,indent=2)+'\n')
     return dict(directory=target,frozen=frozen,seconds=summary['seconds'],summary=summary,replayed=True,
         collection_rollout_gpus=evidence['collection_rollout_gpus'])

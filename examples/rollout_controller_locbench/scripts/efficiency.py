@@ -53,6 +53,7 @@ def analyze(groups, cutoffs=CUTOFFS):
             edges.append(dict(group=group, node=edge.node_id, advantage=edge.weight,
                 mass=abs(edge.weight) / len(prepared.actor) / len(groups),
                 kind='+'.join(tags), spans=len(edge.spans),
+                retain_for_training=any(span.retain_for_training for span in edge.spans),
                 trainable_tokens=edge.edge_tokens,
                 sequence_tokens=sum(len(s.tokens) for s in edge.spans),
                 sequence_squared=sum(len(s.tokens)**2 for s in edge.spans)))
@@ -61,7 +62,11 @@ def analyze(groups, cutoffs=CUTOFFS):
     for cutoff in cutoffs:
         exports = [to_samples(p, group_index=g, min_abs_advantage=cutoff)
                    for g, p in enumerate(groups)]
-        kept = [e for e in edges if cutoff is None or abs(e['advantage']) > cutoff]
+        # The library deliberately retains malformed-compaction edges even when
+        # their shaping advantage is below the numeric cutoff.  The analysis must
+        # model that semantic exception as well as the threshold itself.
+        kept = [e for e in edges if cutoff is None or abs(e['advantage']) > cutoff
+                or e['retain_for_training']]
         exported = {(r['group_index'], r['metadata']['node_id'])
                     for rows in exports for r in rows if r['metadata']['lane'] == 'actor'}
         if exported != {(e['group'], e['node']) for e in kept}:

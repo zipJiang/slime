@@ -7,6 +7,10 @@ import pickle
 import sys
 from runtime_active import EXPERIMENT, contract, digest, verify_harness
 from ppo_runtime import validate_environment
+# ppo_runtime imports legacy-compatible helpers.  Re-establish the selected
+# robust package tree before binding preparation/export classes or unpickling.
+from runtime_v3 import activate as activate_robust
+activate_robust(force=True)
 sys.path.append(str(EXPERIMENT/'snapshots/native-support-v1'))
 from step_controller import DirectBranchTdEstimator
 from step_controller.preparation import prepare_samples

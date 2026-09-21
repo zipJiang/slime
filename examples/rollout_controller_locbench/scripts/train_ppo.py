@@ -93,8 +93,6 @@ def train(args):
     data=prepare(args.loc_candidate,run/'data',args.num_rollout,args.rollout_batch_size)
     plan=json.loads(Path(data['audit']).read_text());schedule_hash=digest(data['audit'])
     if Path(args.prompt_data).resolve()!=Path(data['schedule']).resolve():raise ValueError('Wrong question schedule')
-    if args.loc_benchmark_source and not args.loc_benchmark_only:
-        raise ValueError('Saved collection reuse is limited to benchmark-only attempts')
     if args.loc_benchmark_only and (args.loc_resume_run or args.loc_efficiency_plan):
         raise ValueError('Benchmark mode must start from fresh base/critic weights')
     if args.loc_memory_stress_source and not args.loc_memory_preflight_source:

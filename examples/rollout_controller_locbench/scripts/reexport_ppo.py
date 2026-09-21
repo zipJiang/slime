@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 import pickle
 import sys
-from runtime_v2 import EXPERIMENT,digest
+from runtime_active import EXPERIMENT,digest
+import ppo_runtime
+# Helper imports above may expose a legacy-compatible package.  Normalize once
+# before binding the exporter or loading robust prepared records.
+from runtime_v3 import activate as activate_robust
+activate_robust(force=True)
 sys.path.append(str(EXPERIMENT/'snapshots/native-support-v1'))
 from step_controller.export import to_samples
 from targets import split_targets

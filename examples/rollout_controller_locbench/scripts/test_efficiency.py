@@ -7,9 +7,9 @@ from step_controller.harness import PackedSequence
 from step_controller.preparation.records import ActorSample, CriticSample, PreparedBatch
 
 
-def edge(node, weight, kinds=('task',)):
+def edge(node, weight, kinds=('task',), *, retain=False):
     return ActorSample(node_id=node,spans=tuple(PackedSequence(tokens=(1,2,3),trainable=(False,True,True),
-        logprobs={'policy':(-.1,-.2,-.3)},tag=tag) for tag in kinds),group_id=0,
+        logprobs={'policy':(-.1,-.2,-.3)},tag=tag,retain_for_training=retain) for tag in kinds),group_id=0,
         reward_config_id='r',estimator='direct_branch_td',weight=weight)
 
 
@@ -27,6 +27,14 @@ def test_cutoffs_keep_original_mass_complete_spans_and_critic():
     assert filtered['by_kind']['fold+task']['edges']==1
     assert report['critic_checkpoints']==1
     assert report['selection_status'].startswith('Awaiting')
+
+
+def test_cutoffs_retain_malformed_compaction_training_edges():
+    group=PreparedBatch(actor=(edge(1,.001),edge(2,.001,retain=True)))
+    report=analyze([group],cutoffs=(.01,))
+    candidate=report['candidates'][0]
+    assert candidate['edges']==1
+    assert candidate['removed_edges']==1
 
 
 def row(group=1):
