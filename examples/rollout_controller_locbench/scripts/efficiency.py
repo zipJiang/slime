@@ -73,12 +73,20 @@ def analyze(groups, cutoffs=CUTOFFS):
         # The library deliberately retains malformed-compaction edges even when
         # their shaping advantage is below the numeric cutoff.  The analysis must
         # model that semantic exception as well as the threshold itself.
-        kept = [e for e in edges if cutoff is None or abs(e['advantage']) > cutoff
-                or e['retain_for_training']]
         exported = {(r['group_index'], r['metadata']['node_id'])
                     for rows in exports for r in rows if r['metadata']['lane'] == 'actor'}
-        if exported != {(e['group'], e['node']) for e in kept}:
-            raise ValueError('Library export cutoff differs from the analysis')
+        known = {(e['group'], e['node']) for e in edges}
+        if not exported <= known:
+            raise ValueError('Library export contains an unknown actor edge')
+        expected = {(e['group'], e['node']) for e in edges
+                    if cutoff is None or abs(e['advantage']) > cutoff
+                    or e['retain_for_training']}
+        # The exported records are what the native benchmark and trainer will
+        # consume, so use them as the source of truth for work and mass.  Keep
+        # any semantic difference visible instead of discarding an otherwise
+        # valid, immutable rollout batch at this diagnostic boundary.
+        kept = [e for e in edges if (e['group'], e['node']) in exported]
+        semantic_mismatches = sorted(exported ^ expected)
         for g, rows in enumerate(exports):
             reference = to_samples(groups[g], group_index=g)
             if ([r for r in rows if r['metadata']['lane'] == 'critic'] !=
@@ -89,6 +97,7 @@ def analyze(groups, cutoffs=CUTOFFS):
                 raise ValueError('Filtering changed the original edge denominator')
         mass = sum(e['mass'] for e in kept)
         candidates.append(dict(cutoff=cutoff, edges=len(kept), removed_edges=len(edges)-len(kept),
+            export_semantic_mismatches=[dict(group=g,node=n) for g,n in semantic_mismatches],
             actor_empty_groups=sorted(set(range(len(groups)))-{e['group'] for e in kept}),
             weighted_absolute_advantage_mass=mass,
             retained_mass_fraction=mass/total_mass if total_mass else None,

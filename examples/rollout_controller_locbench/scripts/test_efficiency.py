@@ -25,6 +25,7 @@ def test_cutoffs_keep_original_mass_complete_spans_and_critic():
     assert filtered['weighted_absolute_advantage_mass']==pytest.approx(.2/2/2)
     assert filtered['retained_mass_fraction']==pytest.approx(.2/.21)
     assert filtered['by_kind']['fold+task']['edges']==1
+    assert all(not candidate['export_semantic_mismatches'] for candidate in report['candidates'])
     assert report['critic_checkpoints']==1
     assert report['selection_status'].startswith('Awaiting')
 
@@ -35,6 +36,7 @@ def test_cutoffs_retain_malformed_compaction_training_edges():
     candidate=report['candidates'][0]
     assert candidate['edges']==1
     assert candidate['removed_edges']==1
+    assert candidate['export_semantic_mismatches']==[]
 
 
 def row(group=1):
