@@ -7,9 +7,17 @@ import argparse
 import gzip
 import json
 import math
+import os
 from pathlib import Path
 import pickle
 import statistics
+
+if os.environ.get("LOC_COLLECTION_PROFILE") == "robust-null-v3":
+    # This utility also runs as a fresh subprocess.  Normalize here rather
+    # than relying on the parent's import order or PYTHONPATH precedence.
+    from runtime_v3 import activate as activate_robust
+
+    activate_robust(force=True)
 
 from step_controller.export import to_samples
 
