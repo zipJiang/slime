@@ -48,12 +48,21 @@ scripts = Path.cwd()
 legacy = scripts.parent / "snapshots/harness-v1"
 sys.path.insert(0, str(legacy))
 from examples.locbench.env import RunConfig as LegacyRunConfig
+from step_controller.scheduler.core.tree import SchedulerState as LegacySchedulerState
 assert "robust_compaction" not in LegacyRunConfig.__dataclass_fields__
 
 from runtime_v3 import HARNESS, activate
 activate()
 from examples.locbench.env import RunConfig as RobustRunConfig
+from step_controller.scheduler.core.tree import SchedulerState as RobustSchedulerState
 import examples.locbench.env as env
+import pickle
+assert RobustSchedulerState is not LegacySchedulerState
+assert pickle.loads(pickle.dumps(RobustSchedulerState)) is RobustSchedulerState
+activate()
+from step_controller.scheduler.core.tree import SchedulerState as RepeatedSchedulerState
+assert RepeatedSchedulerState is RobustSchedulerState
+assert pickle.loads(pickle.dumps(RobustSchedulerState)) is RobustSchedulerState
 print(json.dumps({
     "has_robust_compaction": "robust_compaction" in RobustRunConfig.__dataclass_fields__,
     "source": str(Path(env.__file__).resolve()),

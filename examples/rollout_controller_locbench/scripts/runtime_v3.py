@@ -27,18 +27,39 @@ def activate() -> None:
     sys.path[:] = [entry for entry in sys.path if entry != value]
     sys.path.insert(0, value)
     harness = HARNESS.resolve()
-    for name, module in tuple(sys.modules.items()):
-        if not (
+
+    def relevant(name: str, family: str) -> bool:
+        if family == "step_controller":
+            return name == family or name.startswith(family + ".")
+        return (
             name == "examples"
-            or name.startswith("examples.locbench")
-            or name.startswith("examples.toolkit")
-            or name == "step_controller"
-            or name.startswith("step_controller.")
-        ):
-            continue
+            or name == "examples.locbench"
+            or name.startswith("examples.locbench.")
+            or name == "examples.toolkit"
+            or name.startswith("examples.toolkit.")
+        )
+
+    def belongs(module) -> bool:
         source = getattr(module, "__file__", None)
-        if source is None or not Path(source).resolve().is_relative_to(harness):
-            sys.modules.pop(name, None)
+        if source is not None:
+            return Path(source).resolve().is_relative_to(harness)
+        paths = getattr(module, "__path__", ())
+        return any(Path(path).resolve().is_relative_to(harness) for path in paths)
+
+    # A package tree is one import-identity unit.  Keeping robust children while
+    # replacing a stale parent (or vice versa) can leave two class objects with
+    # the same qualified name, which makes completed scheduler states
+    # unpicklable.  If any member is stale, discard the whole relevant family
+    # before callers import classes from the selected immutable snapshot.
+    for family in ("examples", "step_controller"):
+        loaded = [
+            (name, module)
+            for name, module in tuple(sys.modules.items())
+            if relevant(name, family)
+        ]
+        if any(not belongs(module) for _, module in loaded):
+            for name, _ in sorted(loaded, key=lambda item: item[0].count("."), reverse=True):
+                sys.modules.pop(name, None)
     importlib.invalidate_caches()
 
 
