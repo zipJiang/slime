@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+experiment_root=$(cd "$(dirname "$0")/.." && pwd)
+imitation_training=${LOC_IMITATION_TRAINING:?}
+checkpoint=$(/weka/scratch/jhu/bvandur1/zjiang31/rollout-controller/.venv/bin/python -c 'import json,sys;from pathlib import Path;print(json.loads((Path(sys.argv[1])/"complete.json").read_text())["model"])' "$imitation_training")
+run_root=${LOC_CRITIC_OUTPUT:-$experiment_root/runs/base-critic-v1/training-v1}
+train_pairs=${LOC_TRAIN_PAIRS:-7}
+export RAY_ADDRESS=${RAY_ADDRESS:-172.16.203.27:6975}
+export OMP_NUM_THREADS=4 NCCL_IB_DISABLE=1 CUDA_DEVICE_MAX_CONNECTIONS=1
+export GLOO_SOCKET_IFNAME=ens0 NCCL_SOCKET_IFNAME=ens0
+source "$experiment_root/snapshots/slime/scripts/models/qwen3.5-9B.sh"
+exec bash "$experiment_root/scripts/sif.sh" python "$experiment_root/snapshots/native-support-v1/with_torch_cudnn.py" \
+  python "$experiment_root/scripts/train_imitation_critic.py" "${MODEL_ARGS[@]}" \
+  --actor-num-nodes "$train_pairs" --actor-num-gpus-per-node 2 --num-gpus-per-node 2 --rollout-num-gpus 0 \
+  --hf-checkpoint "$checkpoint" --load "$checkpoint" --save "$run_root/native" --save-interval 2 \
+  --rollout-function-path slime.rollout.sglang_rollout.generate_rollout \
+  --num-rollout 16 --num-critic-only-steps 16 --rollout-batch-size 8 --n-samples-per-prompt 1 \
+  --num-steps-per-rollout 1 --global-batch-size 8 --decrease-batch-size-if-needed --skip-eval-before-train \
+  --advantage-estimator ppo --entropy-coef 0 --eps-clip 0.2 --eps-clip-high 0.2 \
+  --optimizer adam --lr 1e-6 --lr-decay-style constant --weight-decay 0 \
+  --adam-beta1 0.9 --adam-beta2 0.95 --clip-grad 1 \
+  --tensor-model-parallel-size 2 --pipeline-model-parallel-size 1 --context-parallel-size 1 \
+  --sequence-parallel --use-distributed-optimizer \
+  --recompute-granularity full --recompute-method uniform --recompute-num-layers 1 \
+  --seq-length 98304 --max-position-embeddings 98304 --use-dynamic-batch-size --max-tokens-per-gpu 24576 --balance-data \
+  --attention-dropout 0 --hidden-dropout 0 --attention-backend flash \
+  --accumulate-allreduce-grads-in-fp32 --attention-softmax-in-fp32 \
+  --loc-collection "${LOC_CRITIC_COLLECTION:?}" --loc-imitation-training "$imitation_training" \
+  --loc-epochs 2 --loc-eval-interval 2 --loc-root-mass .25 --loc-patience 2 "$@"
