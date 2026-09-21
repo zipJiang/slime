@@ -59,10 +59,14 @@ import examples.locbench.env as env
 import pickle
 assert RobustSchedulerState is not LegacySchedulerState
 assert pickle.loads(pickle.dumps(RobustSchedulerState)) is RobustSchedulerState
+# A later question may enter make_world while an earlier question owns live
+# scheduler objects.  Activation is then path maintenance only.
+sentinel = object.__new__(RobustSchedulerState)
 activate()
 from step_controller.scheduler.core.tree import SchedulerState as RepeatedSchedulerState
 assert RepeatedSchedulerState is RobustSchedulerState
 assert pickle.loads(pickle.dumps(RobustSchedulerState)) is RobustSchedulerState
+assert isinstance(pickle.loads(pickle.dumps(sentinel)), RobustSchedulerState)
 print(json.dumps({
     "has_robust_compaction": "robust_compaction" in RobustRunConfig.__dataclass_fields__,
     "source": str(Path(env.__file__).resolve()),

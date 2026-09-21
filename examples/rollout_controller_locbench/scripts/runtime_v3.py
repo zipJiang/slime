@@ -14,6 +14,7 @@ MODEL = "/weka/projects/bvandur1/zjiang31/.cache/huggingface/hub/models--Qwen--Q
 CONTEXT_LIMIT = 98304
 TASK_LIMIT = 80
 REPLY_LIMIT = 16384
+_NORMALIZED = False
 
 
 def activate() -> None:
@@ -23,9 +24,16 @@ def activate() -> None:
     ``__path__``.  Evict only stale harness-owned packages so every subsequent
     import resolves from one coherent immutable tree.
     """
+    global _NORMALIZED
     value = str(HARNESS)
     sys.path[:] = [entry for entry in sys.path if entry != value]
     sys.path.insert(0, value)
+    if _NORMALIZED:
+        # Concurrent question setup can call ``make_world`` after another
+        # question has already created scheduler objects.  Import identities
+        # must remain immutable for the lifetime of the process.
+        importlib.invalidate_caches()
+        return
     harness = HARNESS.resolve()
 
     def relevant(name: str, family: str) -> bool:
@@ -60,6 +68,7 @@ def activate() -> None:
         if any(not belongs(module) for _, module in loaded):
             for name, _ in sorted(loaded, key=lambda item: item[0].count("."), reverse=True):
                 sys.modules.pop(name, None)
+    _NORMALIZED = True
     importlib.invalidate_caches()
 
 
