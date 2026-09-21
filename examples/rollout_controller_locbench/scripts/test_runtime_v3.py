@@ -67,6 +67,9 @@ from step_controller.scheduler.core.tree import SchedulerState as RepeatedSchedu
 assert RepeatedSchedulerState is RobustSchedulerState
 assert pickle.loads(pickle.dumps(RobustSchedulerState)) is RobustSchedulerState
 assert isinstance(pickle.loads(pickle.dumps(sentinel)), RobustSchedulerState)
+import runtime_v3
+runtime_v3.activate = lambda: (_ for _ in ()).throw(AssertionError("late activation"))
+runtime_v3.verify_harness()
 print(json.dumps({
     "has_robust_compaction": "robust_compaction" in RobustRunConfig.__dataclass_fields__,
     "source": str(Path(env.__file__).resolve()),
@@ -84,3 +87,28 @@ print(json.dumps({
     payload = json.loads(result.stdout)
     assert payload["has_robust_compaction"] is True
     assert Path(payload["source"]).is_relative_to(Path(payload["harness"]))
+
+
+def test_production_collector_binds_one_robust_scheduler_tree():
+    scripts = Path(__file__).resolve().parent
+    code = r'''
+import json
+import pickle
+import collect_ppo
+from examples.locbench.env import RunConfig
+import step_controller.scheduler.core.tree as tree
+
+assert "robust_compaction" in RunConfig.__dataclass_fields__
+assert collect_ppo.SchedulerState is tree.SchedulerState
+assert pickle.loads(pickle.dumps(collect_ppo.SchedulerState)) is tree.SchedulerState
+print(json.dumps({"source": tree.__file__, "identity": id(tree.SchedulerState)}))
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=scripts,
+        env=dict(os.environ, LOC_COLLECTION_PROFILE="robust-null-v3"),
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -17,7 +17,7 @@ REPLY_LIMIT = 16384
 _NORMALIZED = False
 
 
-def activate() -> None:
+def activate(*, force: bool = False) -> None:
     """Select this harness even after another frozen harness was imported.
 
     Moving this snapshot to the front cannot change an existing package's
@@ -28,7 +28,7 @@ def activate() -> None:
     value = str(HARNESS)
     sys.path[:] = [entry for entry in sys.path if entry != value]
     sys.path.insert(0, value)
-    if _NORMALIZED:
+    if _NORMALIZED and not force:
         # Concurrent question setup can call ``make_world`` after another
         # question has already created scheduler objects.  Import identities
         # must remain immutable for the lifetime of the process.
@@ -65,7 +65,7 @@ def activate() -> None:
             for name, module in tuple(sys.modules.items())
             if relevant(name, family)
         ]
-        if any(not belongs(module) for _, module in loaded):
+        if force or any(not belongs(module) for _, module in loaded):
             for name, _ in sorted(loaded, key=lambda item: item[0].count("."), reverse=True):
                 sys.modules.pop(name, None)
     _NORMALIZED = True
@@ -111,7 +111,6 @@ def contract():
 
 
 def verify_harness():
-    activate()
     manifest = json.loads((HARNESS / "source-manifest.json").read_text())
     if manifest["source_commit"] != "be3d85ace36f10f3b4ae71804ec2c3929ed7ce68":
         raise ValueError("Unexpected robust harness commit")
@@ -146,7 +145,6 @@ def context(payload, tools, tokenizer):
 
 
 def make_world(case, repo, policy):
-    activate()
     from examples.locbench.env import RunConfig, build_world
     from step_controller.harness import NullWorkspace
 

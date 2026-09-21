@@ -11,8 +11,9 @@ from pathlib import Path
 import pickle
 import statistics
 
-from runtime import EXPERIMENT
 from step_controller.export import to_samples
+
+EXPERIMENT = Path(__file__).resolve().parents[1]
 
 CUTOFFS = (None, 0., .01, .02, .04, .08, .12)
 

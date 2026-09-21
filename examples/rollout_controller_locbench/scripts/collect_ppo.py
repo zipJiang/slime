@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import replace
 import gzip
 import hashlib
+import inspect
 import json
 import math
 from pathlib import Path
@@ -16,6 +17,10 @@ from runtime_active import (EXPERIMENT, MODEL, CONTEXT_LIMIT, REPLY_LIMIT, contr
                      context, digest, verify_harness)
 import ppo_runtime
 from ppo_runtime import make_world
+# Legacy-compatible helper modules above adjust import search paths.  Establish
+# one coherent robust package tree now, before binding any harness classes.
+from runtime_v3 import activate as activate_robust
+activate_robust(force=True)
 sys.path.append(str(EXPERIMENT/'snapshots/native-support-v1'))
 from examples.locbench.dataset import load_cases
 from examples.locbench.repository import prepare
@@ -55,6 +60,21 @@ def rows(path, values):
     tmp=path.with_suffix(path.suffix+'.tmp')
     tmp.write_bytes(gzip.compress(''.join(json.dumps(v,allow_nan=False)+'\n' for v in values).encode(),mtime=0))
     tmp.replace(path)
+
+
+def scheduler_identity(state=None):
+    module=sys.modules.get(SchedulerState.__module__)
+    current=getattr(module,SchedulerState.__qualname__,None) if module is not None else None
+    actual=type(state) if state is not None else SchedulerState
+    return dict(matches=actual is current, imported_class_id=id(SchedulerState),
+        actual_class_id=id(actual),current_class_id=id(current),module_id=id(module),
+        imported_source=inspect.getsourcefile(SchedulerState),actual_source=inspect.getsourcefile(actual),
+        current_source=inspect.getsourcefile(current) if current is not None else None,
+        module_source=getattr(module,'__file__',None),
+        owners=sorted(name for name,value in tuple(sys.modules.items())
+            if name.startswith('step_controller')
+            and vars(value).get('SchedulerState') is actual),
+        sys_path=sys.path[:12])
 
 
 class BoundedSlimePolicy(SlimePolicy):
@@ -109,6 +129,9 @@ class BatchedValueClient(AsyncRewardModel):
 async def search(prompt, workspace, runtime, spend, *, pass_tokens, max_attempts, concurrency, save_pass):
     root=await runtime.runner.start(prompt,workspace=workspace)
     state=SchedulerState.root(root,gating=ConcurrencyGating(concurrency))
+    identity=scheduler_identity(state)
+    if not identity['matches']:
+        raise RuntimeError('Scheduler identity changed before search: '+json.dumps(identity,sort_keys=True))
     scorer=RemainingValueScorer(_value_head(runtime))
     await _score_root(scorer,state)
     if state.stats.get('score_failures',0):raise ValueError('Root critic score failed')
@@ -188,6 +211,10 @@ async def run(args):
             runtime=Runtime(runner=runner,value_model=value,score_timeout=1800,
                 value_serialize=lambda payload:context(payload,tools,tokenizer),config=RolloutConfig(reward_config=rc))
             def save_pass(index,state,passes):
+                identity=scheduler_identity(state)
+                write(args.output/f'{stem}.pass-{index}.identity.json',identity)
+                if not identity['matches']:
+                    raise RuntimeError('Scheduler identity changed during search: '+json.dumps(identity,sort_keys=True))
                 save(args.output/f'{stem}.pass-{index}.native.pkl.gz',state)
                 write(args.output/f'{stem}.progress.json',dict(passes=passes,time=time.time()))
             state,passes=await search(prompt,workspace,runtime,spend,pass_tokens=args.pass_tokens,
